@@ -7,6 +7,7 @@ export const roomIdSchema = z.string().regex(/^[A-Za-z0-9_-]{1,128}$/);
 export const roomInfoSchema = z.object({
   roomId: roomIdSchema,
   creatorId: id,
+  openHeartRcmd: z.boolean().optional().catch(undefined),
   effectiveDurationMs: z.number().finite().nonnegative().optional().catch(undefined),
   roomUsers: z
     .array(

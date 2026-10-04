@@ -2448,7 +2448,9 @@
       "unsupported-resume": "该设备会话暂不支持在本机接续",
       "room-next-unconfirmed": "下一首尚未确认，可手动切歌；不会重复发送结果未知的指令。",
       "no-new-room-songs": "没有可添加的新网易云歌曲",
-      "room-current-song": "当前正在播放的歌曲会保留，请先切换歌曲再移除。"
+      "room-current-song": "当前正在播放的歌曲会保留，请先切换歌曲再移除。",
+      "heart-recommendation-unavailable": "暂时无法开启心动推荐，请确认会员资格、房间状态及操作权限。",
+      "heart-change-unconfirmed": "服务器已受理推荐模式切换，房间状态暂未确认；请稍后查看，未重复发送。"
     },
     "together": {
       "playbackOwner": "一起听仅支持网易云歌曲，由官方客户端播放；SPlayer 本地音源暂停。",
@@ -2547,7 +2549,9 @@
       "playlistOnlyHint": "自动推荐已关闭，仅播放房间歌单。仍可从其他页面手动添加歌曲。",
       "memberRole": "房员 · 跟随房间播放",
       "memberAddingHint": "可手动添加歌曲。自动续歌由房主优先处理，本机跟随房间歌单更新。",
-      "memberWaiting": "正在等待房间下一首；长时间未更新时，本机按续歌规则尝试接续。"
+      "memberWaiting": "正在等待房间下一首；长时间未更新时，本机按续歌规则尝试接续。",
+      "heartMode": "根据双方口味推荐",
+      "heartModeHint": "房间歌曲由服务端按双方口味更新。选择其他来源可关闭心动推荐并恢复普通房间歌单。"
     },
     "chooseDetail": "请选择左侧消息查看详情",
     "openPlayer": "展开播放界面",

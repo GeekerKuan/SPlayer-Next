@@ -17,6 +17,7 @@ const fixture = (resume?: { accountId: string; roomId: string; joinedAt: number 
   const info = {
     roomId: "room-a",
     creatorId: "2",
+    openHeartRcmd: false,
     effectiveDurationMs: 420000,
     roomUsers: [
       { userId: "1", nickname: "self", avatarUrl: "https://p1.music.126.net/self.jpg" },
@@ -60,6 +61,7 @@ const fixture = (resume?: { accountId: string; roomId: string; joinedAt: number 
     listMode: "",
   };
   let queueResponse: Record<string, unknown> = { data: { result: true } };
+  let heartResponse: Record<string, unknown> = { data: { success: true, refreshPlaylist: true } };
   let heartbeat = true;
   let heartbeatHook: (() => Promise<void> | void) | undefined;
   let createHook: (() => Promise<void> | void) | undefined;
@@ -139,6 +141,13 @@ const fixture = (resume?: { accountId: string; roomId: string; joinedAt: number 
             };
           case "roomInvite":
             return { data: { result: true } };
+          case "roomHeart":
+            await writeHook?.(operation);
+            if ((heartResponse.data as { success?: unknown }).success === true) {
+              info.openHeartRcmd = data.status === 1;
+              playlist.displayList.result = info.openHeartRcmd ? ["10", "12"] : ["10", "11"];
+            }
+            return heartResponse;
           case "roomSongs":
             return {
               songs: [10, 11, 12, 13].map((id) => ({
@@ -154,7 +163,8 @@ const fixture = (resume?: { accountId: string; roomId: string; joinedAt: number 
           case "roomCommand": {
             await writeHook?.(operation);
             const sent = JSON.parse(String(data.commandInfo));
-            Object.assign(command, sent, { serverSeq: ++serverSeq });
+            serverSeq = Math.max(serverSeq, command.serverSeq) + 1;
+            Object.assign(command, sent, { serverSeq });
             return { data: { result: true } };
           }
           case "roomAdd": {
@@ -211,6 +221,9 @@ const fixture = (resume?: { accountId: string; roomId: string; joinedAt: number 
     updates,
     setQueueResponse: (body: Record<string, unknown>) => {
       queueResponse = body;
+    },
+    setHeartResponse: (body: Record<string, unknown>) => {
+      heartResponse = body;
     },
     setSongSource: (value: typeof songSource) => {
       songSource = value;
@@ -1378,6 +1391,31 @@ test("manual next at a paused tail adds a recommendation, while disabling recomm
   }
 });
 
+test("remote heart activation during manual tail recommendation drops the stale ordinary candidate", async (t) => {
+  t.mock.timers.enable({ apis: ["Date", "setTimeout"], now: Date.now() });
+  const f = fixture();
+  try {
+    f.setRoom();
+    f.info.creatorId = "1";
+    f.command.targetSongId = "11";
+    f.playback.songId = "11";
+    f.playlist.displayList.rcmdSongIds = [];
+    await f.service.takeOver("room-a");
+    await tickRoom(t, 600);
+    f.onRecommendations(() => {
+      f.info.openHeartRcmd = true;
+      f.playlist.displayList.result = ["11", "12"];
+    });
+    await f.service.control({ action: "next" });
+    assert.equal(f.service.snapshot().recommendationMode, "heart");
+    assert.equal(f.service.snapshot().songId, "12");
+    assert.equal(f.calls.filter((call) => call.operation === "roomAdd").length, 0);
+    assert.equal(f.calls.filter((call) => call.operation === "roomCommand").length, 1);
+  } finally {
+    f.service.stop();
+  }
+});
+
 test("members do not proactively append while playing and an uncertain append is never replayed at song end", async (t) => {
   t.mock.timers.enable({ apis: ["Date", "setTimeout"], now: Date.now() });
   const member = fixture();
@@ -1609,6 +1647,102 @@ test("stopping a slow direct-play operation discards its queue and command conti
     assert.equal(f.calls.filter((c) => c.operation === "roomCommand").length, 0);
   } finally {
     release?.();
+    f.service.stop();
+  }
+});
+
+test("heart recommendation uses the official switch and server-restored queue without REPLACE", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: Date.now() });
+  const f = fixture();
+  try {
+    await f.service.accept("2", "invite");
+    t.mock.timers.tick(1000);
+    const enabled = await f.service.setHeartRecommendation(true);
+    assert.equal(enabled.recommendationMode, "heart");
+    assert.equal(f.playlist.listMode, "");
+    assert.deepEqual(
+      enabled.songs.map((s) => s.id),
+      ["10", "12"],
+    );
+    assert.deepEqual(f.calls.find((c) => c.operation === "roomHeart")?.data, {
+      roomId: "room-a",
+      status: 1,
+    });
+    f.command.targetSongId = "12";
+    f.command.serverSeq++;
+    f.playback.songId = "12";
+    await f.service.connect();
+    t.mock.timers.tick(1000);
+    await f.service.control({ action: "next" });
+    assert.equal(f.calls.filter((c) => c.operation === "roomAdd").length, 0);
+    t.mock.timers.tick(1000);
+    const disabled = await f.service.setHeartRecommendation(false);
+    assert.equal(disabled.recommendationMode, undefined);
+    assert.deepEqual(
+      disabled.songs.map((s) => s.id),
+      ["10", "11"],
+    );
+    assert.deepEqual(
+      f.calls.filter((c) => c.operation === "roomHeart").map((c) => c.data.status),
+      [1, 0],
+    );
+  } finally {
+    f.service.stop();
+  }
+});
+
+test("heart permission failure stays ordinary and never fakes success or repeats the switch", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: Date.now() });
+  const f = fixture();
+  try {
+    await f.service.accept("2", "invite");
+    t.mock.timers.tick(1000);
+    f.setHeartResponse({ code: 200, data: { success: false, refreshPlaylist: false } });
+    await assert.rejects(
+      f.service.setHeartRecommendation(true),
+      /heart-recommendation-unavailable/,
+    );
+    assert.equal(f.service.snapshot().recommendationMode, undefined);
+    assert.equal(f.calls.filter((c) => c.operation === "roomHeart").length, 1);
+    assert.equal(f.calls.filter((c) => c.operation === "roomAdd").length, 0);
+  } finally {
+    f.service.stop();
+  }
+});
+
+test("remote heart switch discards unconfirmed ordinary queue projection", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: Date.now() });
+  const f = fixture();
+  try {
+    await f.service.accept("2", "invite");
+    t.mock.timers.tick(1000);
+    let wrote = false;
+    f.onWrite((op) => {
+      if (op === "roomAdd") wrote = true;
+    });
+    f.onPlaylist(() =>
+      wrote
+        ? {
+            data: {
+              playlist: {
+                ...f.playlist,
+                displayList: { result: ["10", "11"], rcmdSongIds: [] },
+              },
+              playCommand: f.command,
+            },
+          }
+        : undefined,
+    );
+    await f.service.add("13");
+    f.info.openHeartRcmd = true;
+    await f.service.connect();
+    assert.equal(f.service.snapshot().recommendationMode, "heart");
+    assert.deepEqual(
+      f.service.snapshot().songs.map((s) => s.id),
+      ["10", "11"],
+    );
+    assert.equal(f.calls.filter((c) => c.operation === "roomAdd").length, 1);
+  } finally {
     f.service.stop();
   }
 });

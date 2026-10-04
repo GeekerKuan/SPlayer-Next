@@ -34,14 +34,20 @@ const isMember = computed(
 );
 const sourceMode = computed({
   get: () =>
-    isHost.value
-      ? !settings.system.player.togetherAutoRecommend
-        ? "playlistOnly"
-        : settings.system.player.togetherSongSource === "history"
-          ? "queue"
-          : settings.system.player.togetherSongSource || "recommended"
-      : pushMode.value,
+    state.value.recommendationMode === "heart"
+      ? "heart"
+      : isHost.value
+        ? !settings.system.player.togetherAutoRecommend
+          ? "playlistOnly"
+          : settings.system.player.togetherSongSource === "history"
+            ? "queue"
+            : settings.system.player.togetherSongSource || "recommended"
+        : pushMode.value,
   set: (value: string) => {
+    if (value === "heart" || state.value.recommendationMode === "heart") {
+      void changeSource(value);
+      return;
+    }
     if (value !== "playlistOnly") pushMode.value = value;
     if (isHost.value) {
       void settings.setSystem("player.togetherAutoRecommend", value !== "playlistOnly");
@@ -54,6 +60,9 @@ const sourceOptions = computed(() => [
   { value: "recommended", label: t("social.together.recommendedMode") },
   { value: "room", label: t("social.together.roomRecommendedMode") },
   { value: "queue", label: t("social.together.queueMode") },
+  ...(state.value.mode === "native" && state.value.playbackOwned && state.value.members.length >= 2
+    ? [{ value: "heart", label: t("social.together.heartMode") }]
+    : []),
   ...(isHost.value ? [{ value: "playlistOnly", label: t("social.together.playlistOnly") }] : []),
 ]);
 const external = computed(
@@ -73,7 +82,7 @@ const validRecipient = computed(
   () => /^[1-9]\d{0,19}$/.test(recipient.value) && recipient.value !== String(user.profile?.userId),
 );
 const candidates = computed(() =>
-  sourceMode.value === "playlistOnly"
+  sourceMode.value === "playlistOnly" || sourceMode.value === "heart"
     ? []
     : sourceMode.value === "recommended"
       ? together.recommendations.filter(
@@ -136,6 +145,14 @@ async function invite(): Promise<void> {
   if (!validRecipient.value) return;
   if (!state.value.roomId) await together.create(recipient.value);
   else await together.invite(recipient.value);
+}
+/** 服务器确认模式后才更新来源；关闭心动不在本机重建旧房间列表。 */
+async function changeSource(value: string): Promise<void> {
+  if (together.busy) return;
+  const roomId = state.value.roomId;
+  const success = await together.setHeartRecommendation(value === "heart");
+  if (!success || !mounted || state.value.roomId !== roomId || value === "heart") return;
+  sourceMode.value = value;
 }
 async function copyInvite(): Promise<void> {
   if (!state.value.roomId && !(await together.create())) return;
@@ -291,7 +308,12 @@ async function openFallback(): Promise<void> {
         <span class="text-xs text-on-surface-variant shrink-0">
           {{ t("social.together.pushMode") }}
         </span>
-        <SSelect v-model="sourceMode" :options="sourceOptions" class="flex-1 min-w-0" />
+        <SSelect
+          v-model="sourceMode"
+          :options="sourceOptions"
+          :disabled="together.busy"
+          class="flex-1 min-w-0"
+        />
         <SButton
           v-if="sourceMode === 'recommended'"
           size="small"
@@ -378,9 +400,11 @@ async function openFallback(): Promise<void> {
                   t(
                     sourceMode === "playlistOnly"
                       ? "social.together.playlistOnlyHint"
-                      : sourceMode === "room"
-                        ? "social.together.noRoomRecommendations"
-                        : "social.together.noAvailableSongs",
+                      : sourceMode === "heart"
+                        ? "social.together.heartModeHint"
+                        : sourceMode === "room"
+                          ? "social.together.noRoomRecommendations"
+                          : "social.together.noAvailableSongs",
                   )
                 }}
               </p>

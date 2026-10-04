@@ -38,7 +38,7 @@ export interface TogetherSnapshot {
   /** 本曲已结束，等待服务器下一首；不能重新加载旧曲。 */
   awaitingNext?: boolean;
   playMode?: "ORDER_LOOP" | "RANDOM" | "SINGLE_LOOP";
-  /** 仅展示已核验的服务端推荐模式，不据此推断切换参数或会员权限。 */
+  /** 来自服务端 openHeartRcmd 或兼容列表标记；会员权限仍由实际请求确认。 */
   recommendationMode?: "heart";
   recommendations?: TogetherSong[];
   connected: boolean;
@@ -94,6 +94,7 @@ export interface TogetherApi {
   control: (input: TogetherControl) => Promise<SocialResult<TogetherSnapshot>>;
   play: (songIds: string[], startIndex: number) => Promise<SocialResult<TogetherSnapshot>>;
   editQueue: (input: TogetherQueueEdit) => Promise<SocialResult<TogetherSnapshot>>;
+  setHeartRecommendation: (enabled: boolean) => Promise<SocialResult<TogetherSnapshot>>;
   ended: (input: TogetherPlaybackEnd) => Promise<SocialResult<void>>;
   historyCandidates: (songIds: string[]) => Promise<SocialResult<void>>;
   recommendations: () => Promise<SocialResult<TogetherSong[]>>;

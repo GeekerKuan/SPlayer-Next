@@ -2448,7 +2448,9 @@
       "unsupported-resume": "This device session is not supported yet",
       "room-next-unconfirmed": "The next track is unconfirmed. You can skip manually; uncertain commands will not be replayed.",
       "no-new-room-songs": "No new NetEase songs to add",
-      "room-current-song": "The playing song is retained. Switch songs before removing it."
+      "room-current-song": "The playing song is retained. Switch songs before removing it.",
+      "heart-recommendation-unavailable": "Heart recommendations are unavailable. Check membership, room status and permissions.",
+      "heart-change-unconfirmed": "The server accepted the recommendation change, but the room has not confirmed it yet. Check again shortly; the request was not resent."
     },
     "together": {
       "playbackOwner": "Only NetEase songs are supported. The official client plays room audio; SPlayer local playback is stopped.",
@@ -2547,7 +2549,9 @@
       "playlistOnlyHint": "Automatic recommendations are off. Only the room playlist plays. You can still add songs from other pages.",
       "memberRole": "Member · Following room playback",
       "memberAddingHint": "You can add songs manually. The host has priority for automatic continuation; this device follows room updates.",
-      "memberWaiting": "Waiting for the next room song. If no update arrives, this device attempts continuation under the existing rules."
+      "memberWaiting": "Waiting for the next room song. If no update arrives, this device attempts continuation under the existing rules.",
+      "heartMode": "Recommend for both listeners",
+      "heartModeHint": "The server updates the room playlist for both listeners. Choose another source to turn this off and restore the regular room playlist."
     },
     "chooseDetail": "Select a message on the left to view details",
     "openPlayer": "Expand player",

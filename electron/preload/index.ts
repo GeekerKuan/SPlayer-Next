@@ -85,6 +85,8 @@ const api = {
     historyCandidates: (songIds: string[]) =>
       ipcRenderer.invoke("together:historyCandidates", songIds),
     recommendations: () => ipcRenderer.invoke("together:recommendations"),
+    setHeartRecommendation: (enabled: boolean) =>
+      ipcRenderer.invoke("together:setHeartRecommendation", enabled),
     add: (songId: string) => ipcRenderer.invoke("together:add", songId),
     addMany: (songIds: string[]) => ipcRenderer.invoke("together:addMany", songIds),
     onPrepare: (callback: () => void) => subscribe("together:prepare", callback),

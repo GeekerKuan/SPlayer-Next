@@ -178,6 +178,26 @@ test("native transport retries reads and never replays an ambiguous send", async
   await assert.rejects(transport.call("send", {}, new AbortController().signal), /send-unknown/);
   assert.equal(calls, 1);
 });
+test("heart mode switch uses the observed path and never replays an unknown mutation", async () => {
+  let calls = 0;
+  const transport = createNativeTransport({
+    cookies: () => ({ MUSIC_U: "test" }),
+    mergeCookies: () => {},
+    fetch: async (url) => {
+      calls++;
+      assert.equal(
+        String(url),
+        "https://interfacepc.music.163.com/eapi/listen/together/heart/rcmd/change",
+      );
+      throw new TypeError("network error");
+    },
+  });
+  await assert.rejects(
+    transport.call("roomHeart", { roomId: "room", status: 1 }, new AbortController().signal),
+    /operation-unknown/,
+  );
+  assert.equal(calls, 1);
+});
 test("server business errors are not retried", async () => {
   let calls = 0;
   const transport = createNativeTransport({

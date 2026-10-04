@@ -223,6 +223,10 @@ export const togetherService = {
     native.setHistoryCandidates(ids);
   },
   recommendations: () => selected().recommendations(),
+  setHeartRecommendation: (enabled: boolean) => {
+    if (mode !== "native") throw new Error("native-mode-required");
+    return remember(native.setHeartRecommendation(enabled));
+  },
   add: (songId: string) => remember(selected().add(songId)),
   addMany: (songIds: string[]) => {
     if (mode !== "native") throw new Error("native-mode-required");

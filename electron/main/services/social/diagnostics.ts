@@ -53,6 +53,7 @@ const operations = new Set([
   "play",
   "editQueue",
   "historyCandidates",
+  "setHeartRecommendation",
 ]);
 const errors = new Set([
   "auth-required",
@@ -61,6 +62,8 @@ const errors = new Set([
   "offline",
   "rate-limited",
   "room-current-song",
+  "heart-recommendation-unavailable",
+  "heart-change-unconfirmed",
   "busy",
   "operation-unknown",
   "send-unknown",

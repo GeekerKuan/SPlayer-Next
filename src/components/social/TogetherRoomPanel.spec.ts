@@ -3,7 +3,11 @@ import { reactive, defineComponent } from "vue";
 import { createI18n } from "vue-i18n";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import zh from "@/i18n/locales/zh-CN.json";
-const mocks = vi.hoisted(() => ({ add: vi.fn(), setSystem: vi.fn() }));
+const mocks = vi.hoisted(() => ({
+  add: vi.fn(),
+  setSystem: vi.fn(),
+  setHeartRecommendation: vi.fn(async (_enabled: boolean) => true),
+}));
 const together = reactive({
   snapshot: {
     mode: "native",
@@ -20,6 +24,7 @@ const together = reactive({
     ],
     recommendations: [],
     awaitingNext: false,
+    recommendationMode: undefined as "heart" | undefined,
   },
   error: "",
   busy: false,
@@ -70,6 +75,11 @@ describe("together room lists and roles", () => {
     together.snapshot.creatorId = "1";
     together.snapshot.awaitingNext = false;
     settings.system.player.togetherAutoRecommend = true;
+    together.snapshot.recommendationMode = undefined;
+    mocks.setHeartRecommendation.mockImplementation(async (enabled) => {
+      together.snapshot.recommendationMode = enabled ? "heart" : undefined;
+      return true;
+    });
   });
   it("shares two independent list regions and adds only a recommendation not already queued", async () => {
     const wrapper = create();
@@ -95,6 +105,30 @@ describe("together room lists and roles", () => {
     expect(reopened.findComponent(Select).props("modelValue")).toBe("queue");
     reopened.unmount();
     Object.assign(settings.system.player, { togetherSongSource: "recommended" });
+  });
+  it("uses server heart mode without saving it as a local continuation source", async () => {
+    const wrapper = create();
+    wrapper.findComponent(Select).vm.$emit("update:modelValue", "heart");
+    await flushPromises();
+    expect(mocks.setHeartRecommendation).toHaveBeenCalledWith(true);
+    expect(wrapper.findComponent(Select).props("modelValue")).toBe("heart");
+    expect(wrapper.findAllComponents(List)[1].text()).toContain("按双方口味更新");
+    expect(mocks.setSystem).not.toHaveBeenCalled();
+    wrapper.findComponent(Select).vm.$emit("update:modelValue", "queue");
+    await flushPromises();
+    expect(mocks.setHeartRecommendation).toHaveBeenCalledWith(false);
+    expect(mocks.setSystem).toHaveBeenCalledWith("player.togetherSongSource", "history");
+    wrapper.unmount();
+  });
+  it("leaves the source unchanged when the server denies heart recommendation", async () => {
+    mocks.setHeartRecommendation.mockResolvedValueOnce(false);
+    const wrapper = create();
+    const before = wrapper.findComponent(Select).props("modelValue");
+    wrapper.findComponent(Select).vm.$emit("update:modelValue", "heart");
+    await flushPromises();
+    expect(wrapper.findComponent(Select).props("modelValue")).toBe(before);
+    expect(mocks.setSystem).not.toHaveBeenCalled();
+    wrapper.unmount();
   });
   it("keeps room recommendation empty text in the right list and hides host-only options for members", async () => {
     together.snapshot.creatorId = "2";

@@ -276,7 +276,16 @@ export class NativeTogetherService {
     // 解码器兼容未知模式，但自动补歌只允许已观察的普通列表，避免污染未来模式。
     const rawMode = (playlistBody.data as { playlist?: { listMode?: unknown } })?.playlist
       ?.listMode;
-    this.ordinaryQueue = rawMode === undefined || rawMode === null || rawMode === "";
+    const heartMode = info.openHeartRcmd === true || playlist.playlist.listMode === "heart";
+    this.ordinaryQueue =
+      !heartMode && (rawMode === undefined || rawMode === null || rawMode === "");
+    if (heartMode !== (this.state.recommendationMode === "heart")) {
+      // 服务端负责两份列表切换；不能将旧 ADD 投影或末曲续歌带入新模式。
+      this.pendingQueue = null;
+      this.pendingPlayback = null;
+      this.pendingEnd = null;
+      this.tailAttempt = null;
+    }
     const changedRoom = this.state.roomId !== info.roomId;
     if (changedRoom) {
       this.pendingPlayback = null;
@@ -389,7 +398,7 @@ export class NativeTogetherService {
         command?.serverSeq && newer ? command.serverSeq : changedRoom ? 0 : this.state.commandSeq,
       playbackRevision: changedRoom ? 1 : (this.state.playbackRevision || 0) + (newer ? 1 : 0),
       playMode: playlist.playlist.playMode,
-      recommendationMode: playlist.playlist.listMode,
+      recommendationMode: heartMode ? "heart" : undefined,
       recommendations: recommendations.map((id) => byId.get(id)!),
       updatedAt: Date.now(),
       ...(queueError ? { error: queueError } : !this.ownedRoom ? { error: "room-not-owned" } : {}),
@@ -832,10 +841,27 @@ export class NativeTogetherService {
           this.playMode !== "SINGLE_LOOP"
         ) {
           const tail = this.tailAttempt;
-          const candidate =
+          const cachedCandidate =
             tail?.candidate && tail.roomId === this.ownedRoom && tail.songId === this.state.songId
               ? tail.candidate
-              : (await this.tailRecommendation())?.id;
+              : undefined;
+          const songId = this.state.songId;
+          const candidate = cachedCandidate ?? (await this.tailRecommendation())?.id;
+          if (!cachedCandidate) {
+            // 推荐读取期间对方可能切换心动模式；重读后不能把旧候选插入新列表。
+            await this.read();
+            this.requireOwned();
+            if (this.ownedRoom !== roomId) throw new Error("room-changed");
+            if (
+              !this.ordinaryQueue ||
+              this.state.songId !== songId ||
+              !this.options.autoRecommend() ||
+              this.playMode === "SINGLE_LOOP"
+            ) {
+              await this.command(input);
+              return;
+            }
+          }
           if (!candidate) throw new Error("no-room-song");
           if (!this.state.songs.some((song) => song.id === candidate)) {
             if (tail?.candidate === candidate) throw new Error("room-add-unconfirmed");
@@ -990,6 +1016,29 @@ export class NativeTogetherService {
         );
         if (ids.join(",") !== reordered.join(",")) await this.reportQueue("REPLACE", reordered);
       }
+    }, false);
+  }
+
+  /** 官方安卓开关只报告本账号意愿；服务端替换/恢复列表，本机不另发 REPLACE。 */
+  setHeartRecommendation(enabled: boolean): Promise<TogetherSnapshot> {
+    return this.mutation(async () => {
+      this.requireOwned();
+      const roomId = this.ownedRoom;
+      await this.read();
+      this.requireOwned();
+      if (roomId !== this.ownedRoom) throw new Error("room-changed");
+      if ((this.state.recommendationMode === "heart") === enabled) return;
+      if (this.pendingQueue || this.pendingPlayback) throw new Error("rate-limited");
+      this.pendingEnd = null;
+      this.tailAttempt = null;
+      const body = await this.call("roomHeart", { roomId, status: enabled ? 1 : 0 });
+      if ((body.data as { success?: unknown } | undefined)?.success !== true)
+        throw new Error("heart-recommendation-unavailable");
+      await this.read();
+      this.requireOwned();
+      if (this.ownedRoom !== roomId) throw new Error("room-changed");
+      if ((this.state.recommendationMode === "heart") !== enabled)
+        throw new Error("heart-change-unconfirmed");
     }, false);
   }
 

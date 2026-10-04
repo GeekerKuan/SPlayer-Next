@@ -197,6 +197,8 @@ export const useTogetherStore = defineStore("together", () => {
     }
   }
   const leave = (): Promise<boolean> => run(() => window.api.together.leave());
+  const setHeartRecommendation = (enabled: boolean): Promise<boolean> =>
+    run(() => window.api.together.setHeartRecommendation(enabled));
   async function controlRequest(input: TogetherControl): Promise<SocialResult<TogetherSnapshot>> {
     let result: SocialResult<TogetherSnapshot> = { ok: false, error: "rate-limited" };
     await run(async () => {
@@ -333,6 +335,7 @@ export const useTogetherStore = defineStore("together", () => {
     closeExternal,
     joinLink,
     leave,
+    setHeartRecommendation,
     control,
     add,
     addPlaylist,

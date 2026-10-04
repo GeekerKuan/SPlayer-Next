@@ -317,6 +317,9 @@ export const registerTogetherIpc = (): void => {
     z.tuple([]).parse(args);
     return togetherService.recommendations();
   });
+  handle("setHeartRecommendation", (args) =>
+    togetherService.setHeartRecommendation(z.tuple([z.boolean()]).parse(args)[0]),
+  );
   handle("add", (args) => togetherService.add(z.tuple([socialPeer]).parse(args)[0]));
   handle("addMany", (args) =>
     togetherService.addMany(z.tuple([z.array(socialPeer).min(1).max(500)]).parse(args)[0]),
