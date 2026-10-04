@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { useSettingsStore } from "@/stores/settings";
+const props = defineProps<{ disabled?: boolean }>();
 const settings = useSettingsStore();
 const { t } = useI18n();
 const error = ref("");
 const busy = ref(false);
 async function choose(): Promise<void> {
-  if (busy.value) return;
+  if (busy.value || props.disabled) return;
   busy.value = true;
   error.value = "";
   try {
@@ -24,7 +25,7 @@ async function choose(): Promise<void> {
       <p class="flex-1 min-w-0 text-sm break-all text-on-surface-variant">
         {{ settings.system.system.socialDesktopExecutable || t("social.together.noClient") }}
       </p>
-      <SButton size="small" :loading="busy" @click="choose">
+      <SButton size="small" :loading="busy" :disabled="disabled" @click="choose">
         {{ t("social.together.chooseClient") }}
       </SButton>
     </div>

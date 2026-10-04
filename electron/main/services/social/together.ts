@@ -65,10 +65,14 @@ const native = new NativeTogetherService({
   },
   playback: () => {
     const current = lightSnapshot();
+    const player = getPlayer();
+    const state = player.getStatus().state;
     return {
       songId: current.track?.source === "netease" && !current.track.cloud ? current.track.id : "",
-      playing: current.playing,
-      progressMs: toMs(getPlayer().getPosition()),
+      playing: state === "playing",
+      progressMs: toMs(player.getPosition()),
+      // stop/loading 时旧歌曲标签仍可能存在，不能把残留的零进度当作房间播放状态。
+      ready: state === "playing" || state === "paused",
     };
   },
 });

@@ -23,7 +23,7 @@ interface Options {
   update: (snapshot: TogetherSnapshot) => void;
   ownership: (roomId: string, songId: string) => void;
   halt: () => void;
-  playback: () => { songId: string; playing: boolean; progressMs: number };
+  playback: () => { songId: string; playing: boolean; progressMs: number; ready: boolean };
 }
 
 /** 独立 HTTP 房间不依赖 CDP；应用拥有已加入房间，页面卸载仅停止页面订阅。 */
@@ -305,12 +305,12 @@ export class NativeTogetherService {
       if (adoptingRoom !== this.state.roomId) throw new Error("room-changed");
     } else this.requireOwned();
     const playback = this.options.playback();
-    const matches = playback.songId === this.state.songId;
+    const matches = playback.ready && playback.songId === this.state.songId;
     if (!this.state.songId) return;
     const result = await this.call("roomHeartbeat", {
       roomId: adoptingRoom || this.ownedRoom,
       songId: this.state.songId,
-      playStatus: (adoptingRoom ? this.state.playing : matches && playback.playing)
+      playStatus: (adoptingRoom || !matches ? this.state.playing : playback.playing)
         ? "PLAY"
         : "PAUSE",
       progress: Math.max(
@@ -373,7 +373,10 @@ export class NativeTogetherService {
       if (epoch === this.epoch) this.busy = false;
     }
   }
-  private async command(input: TogetherControl): Promise<void> {
+  private async command(
+    input: TogetherControl,
+    initial?: { playing: boolean; progressMs: number },
+  ): Promise<void> {
     this.requireOwned();
     const list = this.state.songs;
     let target = this.state.songId;
@@ -389,14 +392,17 @@ export class NativeTogetherService {
     }
     if (!list.some((s) => s.id === target)) throw new Error("invalid-song");
     const playback = this.options.playback();
+    // 仅本账号新建房间的首个 GOTO 可携带普通播放进度；接管/入房不传 initial。
     const progress =
-      input.action === "seek"
-        ? input.positionMs
-        : ["next", "previous", "goto"].includes(input.action)
-          ? 0
-          : playback.songId === target
-            ? playback.progressMs
-            : this.state.progressMs;
+      initial && input.action === "goto"
+        ? initial.progressMs
+        : input.action === "seek"
+          ? input.positionMs
+          : ["next", "previous", "goto"].includes(input.action)
+            ? 0
+            : playback.ready && playback.songId === target
+              ? playback.progressMs
+              : this.state.progressMs;
     if (progress > (list.find((s) => s.id === target)?.durationMs || 86400000))
       throw new Error("invalid-position");
     const commandType = {
@@ -408,13 +414,17 @@ export class NativeTogetherService {
       goto: "GOTO",
     }[input.action];
     const playStatus =
-      input.action === "pause"
-        ? "PAUSE"
-        : input.action === "seek"
-          ? this.state.playing
-            ? "PLAY"
-            : "PAUSE"
-          : "PLAY";
+      initial && input.action === "goto"
+        ? initial.playing
+          ? "PLAY"
+          : "PAUSE"
+        : input.action === "pause"
+          ? "PAUSE"
+          : input.action === "seek"
+            ? this.state.playing
+              ? "PLAY"
+              : "PAUSE"
+            : "PLAY";
     requireRoomResult(
       await this.call("roomCommand", {
         roomId: this.ownedRoom,
@@ -511,15 +521,7 @@ export class NativeTogetherService {
       if (!result.data || typeof result.data !== "object") throw new Error("room-operation-failed");
       await this.read();
       if (this.state.roomId !== invite.roomId) throw new Error("room-operation-failed");
-      this.ownedRoom = invite.roomId;
-      this.options.halt();
-      await this.read();
-      await this.heartbeat();
-      await this.options.saveResume?.({
-        accountId: this.accountId,
-        roomId: this.ownedRoom,
-        joinedAt: Date.now(),
-      });
+      await this.adoptRoom(invite.roomId);
     });
   }
   create(peerId?: string): Promise<TogetherSnapshot> {
@@ -533,23 +535,41 @@ export class NativeTogetherService {
     const result = await this.call("roomCreate", { refer: "songplay_more" });
     const data = result.data as { roomInfo?: unknown } | undefined;
     const info = parseRoomResponse(roomInfoSchema, data?.roomInfo);
+    if (
+      info.creatorId !== this.accountId ||
+      !info.roomUsers.some((member) => member.userId === this.accountId)
+    )
+      throw new Error("account-mismatch");
     this.ownedRoom = info.roomId;
-    const current = this.options.playback().songId;
+    // 引擎 stop 会清空位置，必须在停机前取一次完整快照；不留定时器或待用进度。
+    const current = this.options.playback();
     this.options.halt();
     await this.read();
-    if (!this.state.songs.length) {
-      const candidate = /^[1-9]\d{0,19}$/.test(current)
-        ? current
-        : (await this.recommendations())[0]?.id;
-      if (!candidate) throw new Error("no-room-song");
+    if (this.state.roomId !== info.roomId || this.creatorId !== this.accountId)
+      throw new Error("room-changed");
+    const useCurrent = current.ready && /^[1-9]\d{0,19}$/.test(current.songId);
+    const candidate = useCurrent ? current.songId : (await this.recommendations())[0]?.id;
+    if (!candidate) throw new Error("no-room-song");
+    if (!this.state.songs.some((song) => song.id === candidate)) {
       await this.addSong(candidate);
       await this.read();
     }
-    if (!this.state.songId && this.state.songs[0]) {
-      await this.command({ action: "goto", songId: this.state.songs[0].id });
-      await this.read();
-    }
-    await this.heartbeat();
+    if (this.state.roomId !== info.roomId || this.creatorId !== this.accountId)
+      throw new Error("room-changed");
+    const duration = this.state.songs.find((song) => song.id === candidate)?.durationMs || 86400000;
+    await this.command(
+      { action: "goto", songId: candidate },
+      {
+        playing: useCurrent ? current.playing : true,
+        progressMs:
+          useCurrent && Number.isFinite(current.progressMs)
+            ? Math.min(duration, Math.max(0, current.progressMs))
+            : 0,
+      },
+    );
+    await this.read();
+    // 首次心跳沿用刚确认的房间进度，不采样已 stop 的普通引擎。
+    await this.heartbeat(info.roomId);
     await this.options.saveResume?.({
       accountId: this.accountId,
       roomId: this.ownedRoom,

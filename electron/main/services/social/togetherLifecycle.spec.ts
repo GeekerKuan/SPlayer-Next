@@ -10,6 +10,17 @@ const mocks = vi.hoisted(() => ({
   nativeConnect: vi.fn(),
   desktopConnect: vi.fn(),
   configuredMode: "native",
+  engineState: "playing",
+  source: "netease",
+  cloud: false,
+  nativePlayback: null as
+    | (() => {
+        songId: string;
+        playing: boolean;
+        progressMs: number;
+        ready: boolean;
+      })
+    | null,
 }));
 const state: TogetherSnapshot = {
   connected: false,
@@ -39,15 +50,26 @@ vi.mock("@main/apis/netease", () => ({
 }));
 vi.mock("@main/store", () => ({ store: { get: () => mocks.configuredMode } }));
 vi.mock("@main/utils/proxy", () => ({ fetchWithProxy: vi.fn() }));
-vi.mock("@main/services/engine", () => ({ getPlayer: vi.fn() }));
+vi.mock("@main/services/engine", () => ({
+  getPlayer: () => ({ getStatus: () => ({ state: mocks.engineState }), getPosition: () => 12 }),
+}));
 vi.mock("@main/utils/logger", () => ({ coreLog: { warn: vi.fn() } }));
-vi.mock("@main/services/nowPlaying", () => ({ lightSnapshot: vi.fn() }));
+vi.mock("@main/services/nowPlaying", () => ({
+  lightSnapshot: () => ({ track: { id: "10", source: mocks.source, cloud: mocks.cloud } }),
+}));
 vi.mock("@main/database/playStats", () => ({ insertPlayEvent: vi.fn() }));
 vi.mock("./index", () => ({ socialService: { snapshot: vi.fn() } }));
 vi.mock("./roomSession", () => ({ loadRoomResume: vi.fn(), saveRoomResume: vi.fn() }));
 vi.mock("./nativeTogetherService", () => ({
   NativeTogetherService: class {
-    constructor(private options: { update: (value: TogetherSnapshot) => void }) {}
+    constructor(
+      private options: {
+        update: (value: TogetherSnapshot) => void;
+        playback: NonNullable<typeof mocks.nativePlayback>;
+      },
+    ) {
+      mocks.nativePlayback = options.playback;
+    }
     stop() {
       mocks.nativeStop();
       this.options.update({ ...state, mode: "native" });
@@ -81,6 +103,9 @@ describe("together shutdown publication", () => {
     mocks.windowDestroyed = false;
     mocks.contentsDestroyed = false;
     mocks.configuredMode = "native";
+    mocks.engineState = "playing";
+    mocks.source = "netease";
+    mocks.cloud = false;
   });
   it("stops both transports without sending to destroyed WebContents", () => {
     mocks.contentsDestroyed = true;
@@ -103,6 +128,30 @@ describe("together shutdown publication", () => {
     expect(mocks.send).toHaveBeenCalledTimes(2);
     expect(mocks.send.mock.calls[0][0]).toBe("together:update");
   });
+  it("reads current engine progress in milliseconds for a playable NetEase seed", () => {
+    expect(mocks.nativePlayback?.()).toEqual({
+      songId: "10",
+      playing: true,
+      progressMs: 12000,
+      ready: true,
+    });
+  });
+  it.each(["local", "qqmusic", "subsonic"])("%s never supplies a room seed song", (source) => {
+    mocks.source = source;
+    expect(mocks.nativePlayback?.().songId).toBe("");
+  });
+  it("private cloud uploads never supply a room seed song", () => {
+    mocks.cloud = true;
+    expect(mocks.nativePlayback?.().songId).toBe("");
+  });
+  it.each(["stopped", "idle", "loading", "error"])(
+    "%s cannot upload a stale audio position",
+    (state) => {
+      mocks.engineState = state;
+      expect(mocks.nativePlayback?.().ready).toBe(false);
+      expect(mocks.nativePlayback?.().playing).toBe(false);
+    },
+  );
   it.each(["darwin", "linux"])(
     "%s always uses independent mode when importing Windows CDP preferences",
     async (platform) => {

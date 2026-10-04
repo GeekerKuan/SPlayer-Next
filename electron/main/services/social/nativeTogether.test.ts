@@ -61,6 +61,9 @@ const fixture = (resume?: { accountId: string; roomId: string; joinedAt: number 
   };
   let heartbeat = true;
   let heartbeatHook: (() => Promise<void> | void) | undefined;
+  let createHook: (() => Promise<void> | void) | undefined;
+  let haltHook: (() => void) | undefined;
+  const playback = { songId: "10", playing: false, progressMs: 1000, ready: true };
   let halts = 0;
   const savedRooms: ({ accountId: string; roomId: string; joinedAt: number } | null)[] = [];
   let leaveOutcome: "success" | "unchanged" | "unknown" = "success";
@@ -77,8 +80,9 @@ const fixture = (resume?: { accountId: string; roomId: string; joinedAt: number 
     ownership: () => {},
     halt: () => {
       halts++;
+      haltHook?.();
     },
-    playback: () => ({ songId: "10", playing: false, progressMs: 1000 }),
+    playback: () => ({ ...playback }),
     transport: {
       call: async (operation, data) => {
         calls.push({ operation, data });
@@ -101,7 +105,12 @@ const fixture = (resume?: { accountId: string; roomId: string; joinedAt: number 
             playlist.displayList.result = [];
             playlist.version = [];
             command.targetSongId = "";
+            await createHook?.();
             return { data: { roomInfo: info } };
+          case "recommendations":
+            return {
+              data: { dailySongs: [{ id: 13, name: "recommended", dt: 60000, ar: [] }] },
+            };
           case "roomInvite":
             return { data: { result: true } };
           case "roomSongs":
@@ -142,10 +151,17 @@ const fixture = (resume?: { accountId: string; roomId: string; joinedAt: number 
     command,
     playlist,
     info,
+    playback,
     savedRooms,
     halts: () => halts,
     onHeartbeat: (hook: () => Promise<void> | void) => {
       heartbeatHook = hook;
+    },
+    onCreate: (hook: () => Promise<void> | void) => {
+      createHook = hook;
+    },
+    onHalt: (hook: () => void) => {
+      haltHook = hook;
     },
     failShort: () => {
       shortFailure = true;
@@ -219,6 +235,160 @@ test("independent host initializes an empty room and sends one native invite aft
   );
   assert.equal(f.calls.find((c) => c.operation === "roomInvite")?.data.acceptorId, "2");
   f.service.stop();
+});
+
+test("only a newly created own room inherits the local song, progress and playing state before stop", async () => {
+  const f = fixture();
+  try {
+    Object.assign(f.playback, { playing: true, progressMs: 31250 });
+    f.onHalt(() => Object.assign(f.playback, { playing: false, progressMs: 0, ready: false }));
+    const next = await f.service.create();
+    const commands = f.calls.filter((call) => call.operation === "roomCommand");
+    assert.equal(commands.length, 1);
+    const initial = JSON.parse(String(commands[0].data.commandInfo));
+    assert.equal(initial.commandType, "GOTO");
+    assert.equal(initial.targetSongId, "10");
+    assert.equal(initial.progress, 31250);
+    assert.equal(initial.playStatus, "PLAY");
+    const heart = f.calls.find((call) => call.operation === "roomHeartbeat")!;
+    assert.equal(heart.data.roomId, "room-a");
+    assert.equal(heart.data.playStatus, "PLAY");
+    assert.ok(Number(heart.data.progress) >= 31250);
+    assert.equal(next.songId, "10");
+    assert.equal(next.playing, true);
+    assert.ok(next.progressMs >= 31250);
+    assert.ok(!f.calls.some((call) => call.operation === "recommendations"));
+  } finally {
+    f.service.stop();
+  }
+});
+
+test("creating a room preserves a paused NetEase track's position", async () => {
+  const f = fixture();
+  try {
+    f.playback.progressMs = 18750;
+    const next = await f.service.create();
+    assert.equal(next.playing, false);
+    assert.equal(next.progressMs, 18750);
+    const heart = f.calls.find((call) => call.operation === "roomHeartbeat")!;
+    assert.equal(heart.data.progress, 18750);
+    assert.equal(heart.data.playStatus, "PAUSE");
+  } finally {
+    f.service.stop();
+  }
+});
+
+test("non-NetEase playback starts a recommended NetEase song without carrying its local position", async (t) => {
+  for (const roomRecommendations of [true, false]) {
+    await t.test(roomRecommendations ? "room candidate" : "daily candidate", async () => {
+      const f = fixture();
+      try {
+        Object.assign(f.playback, { songId: "", playing: true, progressMs: 47000 });
+        if (!roomRecommendations) f.playlist.displayList.rcmdSongIds = [];
+        const next = await f.service.create();
+        const initial = JSON.parse(
+          String(f.calls.find((call) => call.operation === "roomCommand")!.data.commandInfo),
+        );
+        assert.equal(initial.targetSongId, roomRecommendations ? "12" : "13");
+        assert.equal(initial.progress, 0);
+        assert.equal(initial.playStatus, "PLAY");
+        assert.equal(next.songId, roomRecommendations ? "12" : "13");
+      } finally {
+        f.service.stop();
+      }
+    });
+  }
+});
+
+test("new-room seed clamps invalid or stale engine positions to a valid song range", async (t) => {
+  for (const [position, expected] of [
+    [NaN, 0],
+    [-300, 0],
+    [90000, 60000],
+  ]) {
+    await t.test(String(position), async () => {
+      const f = fixture();
+      try {
+        f.playback.progressMs = position;
+        await f.service.create();
+        const initial = JSON.parse(
+          String(f.calls.find((call) => call.operation === "roomCommand")!.data.commandInfo),
+        );
+        assert.equal(initial.progress, expected);
+      } finally {
+        f.service.stop();
+      }
+    });
+  }
+});
+
+test("a create response for another owner never receives the local playback seed", async () => {
+  const f = fixture();
+  try {
+    f.onCreate(() => {
+      f.info.creatorId = "2";
+    });
+    await assert.rejects(f.service.create(), /account-mismatch/);
+    assert.equal(f.halts(), 0);
+    assert.ok(
+      !f.calls.some((call) => ["roomAdd", "roomCommand", "roomHeartbeat"].includes(call.operation)),
+    );
+  } finally {
+    f.service.stop();
+  }
+});
+
+test("accepting an existing invitation never seeds a different local song or position", async () => {
+  const f = fixture();
+  try {
+    Object.assign(f.playback, { songId: "13", playing: true, progressMs: 49000 });
+    const next = await f.service.accept("2", "invite");
+    assert.equal(next.songId, "10");
+    assert.equal(next.progressMs, 1000);
+    const heart = f.calls.find((call) => call.operation === "roomHeartbeat")!;
+    assert.equal(heart.data.songId, "10");
+    assert.equal(heart.data.progress, 1000);
+    assert.equal(heart.data.playStatus, "PAUSE");
+    assert.ok(!f.calls.some((call) => call.operation === "roomCommand"));
+  } finally {
+    f.service.stop();
+  }
+});
+
+test("a stale NetEase label on a stopped engine uses recommendation instead of its residual position", async () => {
+  const f = fixture();
+  try {
+    Object.assign(f.playback, { ready: false, progressMs: 41000 });
+    const next = await f.service.create();
+    assert.equal(next.songId, "12");
+    const initial = JSON.parse(
+      String(f.calls.find((call) => call.operation === "roomCommand")!.data.commandInfo),
+    );
+    assert.equal(initial.progress, 0);
+  } finally {
+    f.service.stop();
+  }
+});
+
+test("a command while room audio is loading uses server position even with the same stale song label", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: Date.now() });
+  const f = fixture();
+  try {
+    f.setRoom();
+    f.command.progress = 17500;
+    f.command.playStatus = "PLAY";
+    f.onHalt(() => Object.assign(f.playback, { ready: false, playing: false, progressMs: 0 }));
+    await f.service.takeOver("room-a");
+    t.mock.timers.tick(1000);
+    await f.service.control({ action: "pause" });
+    const sent = JSON.parse(
+      String(f.calls.find((call) => call.operation === "roomCommand")!.data.commandInfo),
+    );
+    assert.ok(sent.progress >= 17500);
+    assert.equal(sent.playStatus, "PAUSE");
+  } finally {
+    f.service.stop();
+  }
 });
 
 test("leave validates remote room state instead of assuming the heartbeat result schema", async (t) => {

@@ -5,6 +5,8 @@ import { useSocialStore } from "@/stores/social";
 import { useCopyText } from "@/composables/useCopyText";
 import { useTogetherDialog } from "@/composables/useTogetherDialog";
 import { dialog } from "@/composables/useDialog";
+import { isWin } from "@/utils/config";
+import type { SettingItem } from "@/types/settings-schema";
 const props = defineProps<{ peerId?: string }>();
 const together = useTogetherStore();
 const settings = useSettingsStore();
@@ -31,7 +33,21 @@ let mounted = true;
 onBeforeUnmount(() => {
   mounted = false;
 });
-const desktop = computed(() => settings.system.system.socialTogetherMode === "desktop-cdp");
+const desktop = computed(
+  () => isWin && settings.system.system.socialTogetherMode === "desktop-cdp",
+);
+// 复用原设置控件与持久化绑定；调试选项不进入普通设置搜索，房间存续时不能切换。
+const implementationSetting: SettingItem = {
+  key: "socialTogetherMode",
+  type: "select",
+  binding: { store: "settings", path: "system.system.socialTogetherMode" },
+  options: [
+    { value: "native", labelKey: "settings.socialTogetherMode.native" },
+    { value: "desktop-cdp", labelKey: "settings.socialTogetherMode.desktop" },
+  ],
+  visible: () => isWin,
+  disabled: () => together.busy || !!together.snapshot.roomId,
+};
 const { t } = useI18n();
 const position = ref(0);
 const dragging = ref(false);
@@ -81,21 +97,14 @@ async function replaceRoom(): Promise<void> {
 <template>
   <div class="flex-1 min-h-0 flex flex-col gap-3">
     <div class="rounded-3 bg-on-surface/4 p-4 flex flex-col gap-3 shrink-0 max-h-3/5 overflow-auto">
+      <SettingsItem :item="implementationSetting" />
+      <TogetherClientSetting v-if="desktop && !inRoom" :disabled="together.busy" />
       <p class="text-sm text-on-surface-variant">
         {{ t(desktop ? "social.together.playbackOwner" : "social.together.nativePlayback") }}
       </p>
       <div class="flex gap-2 items-center flex-wrap">
         <SButton size="small" :loading="together.busy" @click="together.connect()">
           {{ t("social.together.connect") }}
-        </SButton>
-        <SButton
-          v-if="desktop"
-          size="small"
-          variant="text"
-          :disabled="together.busy"
-          @click="together.connect(true)"
-        >
-          {{ t("social.together.chooseClient") }}
         </SButton>
         <template v-if="together.snapshot.connected">
           <span class="text-sm">{{ t(`social.together.status.${together.snapshot.status}`) }}</span>

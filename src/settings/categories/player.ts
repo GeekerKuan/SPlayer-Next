@@ -1,5 +1,4 @@
 import type { SettingCategory } from "@/types/settings-schema";
-import TogetherClientSetting from "@/components/settings/custom/TogetherClientSetting.vue";
 import DeviceSelector from "@/components/settings/custom/DeviceSelector.vue";
 import { isWin } from "@/utils/config";
 import IconLucidePlay from "~icons/lucide/play";
@@ -7,7 +6,6 @@ import { getActiveDeviceId } from "@/core/player";
 import { setDeviceVolume } from "@/services/deviceVolume";
 import { useStatusStore } from "@/stores/status";
 import { useSettingsStore } from "@/stores/settings";
-import { useTogetherStore } from "@/stores/together";
 
 const playerCategory: SettingCategory = {
   id: "player",
@@ -189,26 +187,6 @@ const playerCategory: SettingCategory = {
           type: "switch",
           binding: { store: "settings", path: "player.togetherAvatarsInFullPlayer" },
           defaultValue: true,
-        },
-        {
-          key: "socialTogetherMode",
-          type: "select",
-          binding: { store: "settings", path: "system.system.socialTogetherMode" },
-          options: [
-            { value: "native", labelKey: "settings.socialTogetherMode.native" },
-            { value: "desktop-cdp", labelKey: "settings.socialTogetherMode.desktop" },
-          ],
-          defaultValue: "native",
-          visible: () => isWin,
-          disabled: () => !!useTogetherStore().snapshot.roomId,
-        },
-        {
-          key: "socialDesktopExecutable",
-          type: "custom",
-          component: TogetherClientSetting,
-          fullWidth: true,
-          visible: () =>
-            isWin && useSettingsStore().system.system.socialTogetherMode === "desktop-cdp",
         },
       ],
     },
