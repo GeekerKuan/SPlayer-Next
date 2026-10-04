@@ -64,6 +64,8 @@ const api = {
     joinLink: (invite: import("@shared/types/together").TogetherInvitation) =>
       ipcRenderer.invoke("together:joinLink", invite),
     readClipboardInvite: () => ipcRenderer.invoke("together:readClipboardInvite"),
+    previewInvite: (invite) => ipcRenderer.invoke("together:previewInvite", invite),
+    cancelPreview: () => ipcRenderer.invoke("together:cancelPreview"),
     openInviteLink: (url: string) => ipcRenderer.invoke("together:openInviteLink", url),
     accept: (peerId: string, messageId: string) =>
       ipcRenderer.invoke("together:accept", peerId, messageId),

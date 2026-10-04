@@ -67,21 +67,27 @@ onMounted(() => {
             {{ t("common.totalSongs", { count: history.tracks.length }) }}
           </span>
           <span v-if="crossDevice.error" role="status" class="text-xs text-error">
-            {{ t(`social.errors.${crossDevice.error}`, t("social.errors.offline")) }}
+            {{
+              crossDevice.error === "rate-limited"
+                ? t("history.resumeLimited")
+                : t(`social.errors.${crossDevice.error}`, t("social.errors.offline"))
+            }}
           </span>
         </div>
       </div>
       <div class="flex items-center justify-between gap-4">
         <div class="flex items-center gap-3">
           <SButton
-            v-if="crossDevice.canResume"
+            v-if="crossDevice.enabled"
             variant="secondary"
             round
-            :loading="crossDevice.busy"
-            @click="crossDevice.resume"
+            :loading="crossDevice.busy || crossDevice.checking"
+            @click="crossDevice.canResume ? crossDevice.resume() : crossDevice.checkResume()"
           >
             <template #icon><IconLucideMonitorSmartphone /></template>
-            {{ t("history.resumeOtherDevice") }}
+            {{
+              t(crossDevice.canResume ? "history.resumeOtherDevice" : "history.checkOtherDevice")
+            }}
           </SButton>
           <SButton
             type="primary"

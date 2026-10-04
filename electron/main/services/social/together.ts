@@ -24,6 +24,8 @@ import type {
 } from "@shared/types/together";
 import { loadRoomResume, saveRoomResume } from "./roomSession";
 import { coreLog } from "@main/utils/logger";
+import { loadInvitePreview } from "./invitePreview";
+import type { TogetherClipboardInvite } from "@shared/types/together";
 const stats = createTogetherStats(insertPlayEvent);
 const transport = createNativeTransport({
   cookies: getNeteaseCookies,
@@ -118,6 +120,15 @@ const remember = async (operation: Promise<TogetherSnapshot>): Promise<TogetherS
 };
 /** 模式只在显式连接时改变，不以 CDP 自动补救独立模式的协议失败。 */
 export const togetherService = {
+  previewInvite: async (invite: TogetherClipboardInvite, signal: AbortSignal) => {
+    const token = getNeteaseCookies().MUSIC_U;
+    const account = await socialService.snapshot();
+    signal.throwIfAborted();
+    if (getNeteaseCookies().MUSIC_U !== token) throw new Error("account-changed");
+    const preview = await loadInvitePreview(invite, account, transport, signal);
+    if (getNeteaseCookies().MUSIC_U !== token) throw new Error("account-changed");
+    return preview;
+  },
   connect: async (): Promise<TogetherSnapshot> => {
     const next =
       process.platform === "win32" ? store.get("system.socialTogetherMode") || "native" : "native";

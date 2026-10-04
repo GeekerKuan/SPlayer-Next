@@ -1,6 +1,6 @@
 # 后续工作顺序与完成条件
 
-本计划适用于当前社交开发版本，完整已实现范围见 [需求核对表](./task-audit-2026-10-04.md)。源码上传和构建检查可以先进行；安装包、实际覆盖升级和关机放在功能完成后。
+本计划适用于当前社交开发版本，完整已实现范围见 [需求核对表](./task-audit-2026-10-04.md)。当前优先完成退出、续播及邀请预览的本地修复，随后统一上传并构建测试安装包。实际验收由用户执行；未核验协议继续保留，全部任务完成后才关机。详见 [本轮优先修复](./lifecycle-relay-invites.md)。
 
 ## 1. 状态与数据保护：先完成
 
@@ -12,9 +12,9 @@
 
 消息、独立一起听、跨端历史和剪贴板解析共享跨平台 Electron/Vue 代码。Windows CDP 仅作为 Windows 可选兼容通道；Mac 不提供 exe 选择入口，即使导入 Windows CDP 偏好也使用独立模式。
 
-GitHub Actions 分别使用 Intel 和 Apple Silicon runner 编译各自原生库，禁止搬运 Windows `.node`。先运行测试、类型检查、应用构建和打包后原生库/SQLite 加载检查；默认不生成 DMG/ZIP。通过用户功能验收后再勾选安装包生成。原 appId、产品名、用户数据路径、数据库和持久化格式沿用，不增加 Mac 专用配置副本。
+GitHub Actions 分别使用 Intel 和 Apple Silicon runner 编译各自原生库，禁止搬运 Windows `.node`。先运行测试、类型检查、应用构建和打包后原生库/SQLite 加载检查。按最新要求，本轮生成 Windows NSIS 与 Mac DMG/ZIP 测试包供用户验收。原 appId、产品名、用户数据路径、数据库和持久化格式沿用，不增加 Mac 专用配置副本。
 
-目标仓库为 `GeekerKuan/SPlayer-Next`，社交源码放 `social-together` 分支。默认分支只注册手动 Mac 工作流；不会因为提交功能源码触发上游的 dev 分支 Windows 自动安装包构建。操作见 [Mac 云端构建](./macos-build.md)。云端日志与安装包通过 Actions 查看，未成功运行前不称为 Mac 已验证。
+目标仓库为 `GeekerKuan/SPlayer-Next`，社交源码放 `social-together` 分支。默认分支只注册手动 Mac 工作流；不会因为提交功能源码触发上游的 dev 分支 Windows 自动安装包构建。操作见 [Mac 云端构建](./macos-build.md)。前一轮三个平台云端构建已成功；当前修复将再次构建，Mac 实机退出与升级仍待验收。云端日志和安装包通过 Actions 查看。
 
 ## 3. 自动续歌与心动推荐：分开验收
 
@@ -30,4 +30,4 @@ GitHub Actions 分别使用 Intel 和 Apple Silicon runner 编译各自原生库
 
 自动检查覆盖生命周期、队列/历史持久化、账号隔离、并发和原协议参数。用户负责耗时双端、弱网、快速动画切换、非空续播和真实旧版覆盖升级验收。原播放、歌词、统计、打卡及插件功能一同回归。
 
-以上完成后生成 Windows NSIS 和 Mac DMG/ZIP，记录版本、源码 commit 与 SHA-256。Windows 继续沿用原安装与数据身份；Mac 检查实际原生库架构、权限和现有数据读取。Developer ID 签名、公证需要开发者凭据，当前不宣称具备。全部任务完成并交付后，才按此前要求关机。
+按最新要求先生成当前可测试版本的 Windows NSIS 和 Mac DMG/ZIP，记录版本、源码 commit 与 SHA-256；剩余协议需求不因打包成功视为完成。Windows 继续沿用原安装与数据身份；Mac 检查实际原生库架构、权限和现有数据读取。Developer ID 签名、公证需要开发者凭据，当前不宣称具备。全部任务完成并交付后，才按此前要求关机。

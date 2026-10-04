@@ -12,7 +12,8 @@ flowchart LR
   Social --> Native[隔离的 PC eapi 通道]
   Focus[主窗口获得焦点] --> Clip[读取一次剪贴板 / 摘要去重]
   Clip --> Resolve[平台域名和参数校验 / 有限重定向]
-  Resolve --> Join[校验账号及现有房间后加入]
+  Resolve --> Preview[双方头像 / 分享时歌曲 / 用户确认]
+  Preview --> Join[校验账号及现有房间后加入]
   Resolve --> Browser[无法解析时由用户打开浏览器]
   Join --> Snapshot[统一 TogetherSnapshot]
   Snapshot --> Dialog[SDialog 正常窗口 / 调试窗口]
@@ -64,7 +65,7 @@ Cookie、设备标识和完整续播 offer 留在主进程。全部新 IPC 限�
 
 ## 已验证与尚缺的证据
 
-128 项 Node、271 项 Vitest（44 个文件）、两侧 TypeScript、修改文件 Prettier/ESLint 和 electron-vite 生产编译通过。覆盖跨端参数、明确失败后的补传、账号取消、历史删除并发、IPC 单飞、头像迟到加载、虚拟滚动锚点及页面卸载。新增自动接续覆盖重复结束、推荐耗尽、四秒等待、远端先切歌、手动操作竞态、未知写入、单曲/心动/未知模式及销毁。此前独立入房、主机建房、邀请和双方播放同步的用户实测证据继续有效，拖动平滑同步已由用户确认。
+136 项 Node、283 项 Vitest（48 个文件）、两侧 TypeScript、修改文件 Prettier/ESLint 和 electron-vite 生产编译通过。覆盖跨端参数、明确失败后的补传、账号取消、历史删除并发、IPC 单飞、头像迟到加载、虚拟滚动锚点及页面卸载。新增自动接续覆盖重复结束、推荐耗尽、四秒等待、远端先切歌、手动操作竞态、未知写入、单曲/心动/未知模式及销毁。此前独立入房、主机建房、邀请和双方播放同步的用户实测证据继续有效，拖动平滑同步已由用户确认。
 
 本轮对授权测试账号的原生读取得到 299 条其他设备播放记录；配置、最近播放、位置读取及曲目/队列提交均返回成功，但本次位置响应没有续播 offer，**不把接口成功当作真实跨端续播验收**。短链接口和有限重定向用不关联真实房间的示例标识验证，返回官方短链、302 和相同 H5 参数；真实房间的手机打开体验由用户验收。脱敏记录见 [本轮协议验证](../../protocols/netease-native/validation-2026-10-04.md)。
 
@@ -82,7 +83,7 @@ Cookie、设备标识和完整续播 offer 留在主进程。全部新 IPC 限�
 
 第三方许可说明已纳入安装器 extraFiles，后续包会同时保留原 AGPL 许可及 MIT 来源声明；应用身份和数据目录保持原值。
 
-macOS 工作流保存为 `.github/workflows/build-macos.yml`，目标为用户 Fork `GeekerKuan/SPlayer-Next`。默认分支注册手动工作流，`source_ref` 选择 `social-together` 源码分支；首次不勾选 `package_installers`，只检查双架构应用、原生模块和 SQLite。功能验收后才生成 DMG/ZIP。非 Windows 平台固定使用独立一起听模式，导入 Windows CDP 设置也不会连接官方客户端。操作见 [Mac 云端构建](./macos-build.md)，执行成功前不宣称 Mac 已验证。产物未经 Developer ID 签名和公证。
+macOS 工作流保存为 `.github/workflows/build-macos.yml`，目标为用户 Fork `GeekerKuan/SPlayer-Next`。默认分支注册手动工作流，`source_ref` 选择 `social-together` 源码分支；后续新增三平台安装包工作流，按最新要求先生成当前可测试版本安装包，详见 [安装包下载](./desktop-build.md)。非 Windows 平台固定使用独立一起听模式，导入 Windows CDP 设置也不会连接官方客户端。操作见 [Mac 云端构建](./macos-build.md)，执行成功前不宣称 Mac 已验证。产物未经 Developer ID 签名和公证。
 
 ## 跨设备房间接管确认
 
@@ -99,3 +100,7 @@ macOS 工作流保存为 `.github/workflows/build-macos.yml`，目标为用户 F
 播放器自然结束仍先沿用原统计与定时关闭，仅未定时关闭时通过受限 `together:ended` IPC 提交房间、歌曲和指令版本。主进程核对实际引擎 `isFinished` 后，复用房间轮询处理接续；等待期间前端保留临时队列，但不重新加载已结束歌曲。推荐自动续歌默认开启，到列表末尾增量补一首房间推荐，耗尽时使用执行账号每日推荐；原列表不替换。单曲循环、heart 和未知模式不插入个人推荐。
 
 房主立即接续；房员先等四秒，再核对服务器歌曲和指令没有变化，由 UID 选出的房员接续。服务端成员没有可靠在线字段，不将此判断等同离线证明，不修改 creatorId，也不宣称房员能读取离线房主口味。手动操作、远端新指令、账号变化和销毁取消等待。未知 ADD 只读确认后才继续，未知 NEXT 不重放，提示可手动切歌。版本重读不能代替未经核验的跨客户端原子锁。同账号多实例并发与真实房主离线场景仍需用户验收，详见 [接续设计](./together-continuation.md)。
+
+## 退出、续播与焦点邀请修复
+
+退出时协议注册按 Session 复用；续播入口独立限频、已领取入口不被旧读取复活；剪贴板改为用户确认的头像/歌曲预览。前一轮三平台云端构建已成功，当前修复一起本地验证后再次构建；实际退出、重复续播及覆盖升级由用户验收。详见 [设计与验收](./lifecycle-relay-invites.md)。

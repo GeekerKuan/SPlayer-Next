@@ -307,6 +307,7 @@ declare module 'vue' {
     TogetherAvatars: typeof import('./src/components/social/TogetherAvatars.vue')['default']
     TogetherClientSetting: typeof import('./src/components/settings/custom/TogetherClientSetting.vue')['default']
     TogetherDialog: typeof import('./src/components/modals/TogetherDialog.vue')['default']
+    TogetherInvitePanel: typeof import('./src/components/social/TogetherInvitePanel.vue')['default']
     TogetherPanel: typeof import('./src/components/social/TogetherPanel.vue')['default']
     TogetherRoomPanel: typeof import('./src/components/social/TogetherRoomPanel.vue')['default']
     Toolbar: typeof import('./src/components/player/Toolbar.vue')['default']

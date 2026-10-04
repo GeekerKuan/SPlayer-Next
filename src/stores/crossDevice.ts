@@ -8,6 +8,7 @@ import * as player from "@/core/player";
 export const useCrossDeviceStore = defineStore("crossDevice", () => {
   const canResume = ref(false);
   const busy = ref(false);
+  const checking = ref(false);
   const error = ref("");
   let epoch = 0;
   let refreshing: Promise<void> | null = null;
@@ -18,7 +19,7 @@ export const useCrossDeviceStore = defineStore("crossDevice", () => {
   const cancel = (): void => {
     epoch++;
     refreshing = null;
-    busy.value = canResume.value = false;
+    busy.value = checking.value = canResume.value = false;
     error.value = "";
     void useHistoryStore().setRemote("", []);
     void window.api.crossDevice.cancel();
@@ -28,6 +29,7 @@ export const useCrossDeviceStore = defineStore("crossDevice", () => {
     if (!enabled.value) return Promise.resolve();
     if (refreshing) return refreshing;
     const generation = epoch;
+    checking.value = true;
     const accountId = String(useUserStore().profile!.userId);
     const job = (async () => {
       try {
@@ -42,20 +44,35 @@ export const useCrossDeviceStore = defineStore("crossDevice", () => {
           await useHistoryStore().setRemote(accountId, result.data.records);
           if (generation !== epoch) return;
           canResume.value = result.data.canResume;
+          error.value = result.data.resumeError || "";
         } else if (
           result.ok ||
           ["auth-required", "account-changed", "disabled"].includes(result.error)
         )
           cancel();
+        else {
+          canResume.value = false;
+          error.value = result.error;
+        }
       } catch {
-        /* 网络中断保留当前账号的已取得记录。 */
+        if (generation === epoch) {
+          canResume.value = false;
+          error.value = "offline";
+        }
       }
     })();
     refreshing = job;
     void job.finally(() => {
       if (refreshing === job) refreshing = null;
+      if (generation === epoch) checking.value = false;
     });
     return job;
+  };
+  const checkResume = async (): Promise<void> => {
+    const generation = epoch;
+    await refresh();
+    if (generation === epoch && enabled.value && !canResume.value && !error.value)
+      error.value = "no-resume";
   };
 
   const resume = async (): Promise<void> => {
@@ -95,5 +112,5 @@ export const useCrossDeviceStore = defineStore("crossDevice", () => {
       if (generation === epoch) busy.value = false;
     }
   };
-  return { canResume, busy, error, enabled, refresh, resume, cancel };
+  return { canResume, busy, checking, error, enabled, refresh, checkResume, resume, cancel };
 });

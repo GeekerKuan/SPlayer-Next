@@ -10,13 +10,16 @@ watch(
   () => useUserStore().profile?.userId,
   () => {
     focusEpoch++;
+    const dialog = useTogetherDialog();
+    if (dialog.clipboardInvite.value) dialog.open.value = false;
+    void window.api.together.cancelPreview();
   },
 );
 let focusEpoch = 0;
 let checkingClipboard = false;
 /** 主窗口每次获得焦点读一次，失焦、销毁及账号变化后丢弃迟到结果。 */
 async function checkInvitationClipboard(): Promise<void> {
-  if (checkingClipboard || !document.hasFocus()) return;
+  if (checkingClipboard || !document.hasFocus() || useTogetherDialog().open.value) return;
   const epoch = ++focusEpoch;
   checkingClipboard = true;
   try {
@@ -28,12 +31,7 @@ async function checkInvitationClipboard(): Promise<void> {
       dialog.showLink(invite.url);
       return;
     }
-    const together = useTogetherStore();
-    dialog.show();
-    if (!(await together.connect()) || epoch !== focusEpoch) return;
-    if (!together.snapshot.roomId) await together.joinLink(invite.invitation);
-    else if (together.snapshot.roomId !== invite.invitation.roomId)
-      together.error = "already-in-room";
+    dialog.showInvitation(invite);
   } catch {
     /* 剪贴板访问失败不影响播放器启动。 */
   } finally {
@@ -49,6 +47,7 @@ onMounted(() => {
   useTogetherStore().start();
   window.addEventListener("focus", checkInvitationClipboard);
   window.addEventListener("blur", invalidateFocus);
+  void checkInvitationClipboard();
   unsubscribe = window.api.social.onNavigate(async (peerId) => {
     await router.push({ name: "messages" });
     await useSocialStore().select(peerId);
@@ -60,6 +59,7 @@ onBeforeUnmount(() => {
   window.removeEventListener("focus", checkInvitationClipboard);
   window.removeEventListener("blur", invalidateFocus);
   useTogetherStore().dispose();
+  void window.api.together.cancelPreview();
 });
 
 watchEffect(() => {

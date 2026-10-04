@@ -25,6 +25,10 @@ export class CrossDeviceService {
   private abort = new AbortController();
   private snapshot: CrossDeviceSnapshot = { accountId: "", records: [], canResume: false };
   private refreshedAt = 0;
+  private offerCheckedAt = 0;
+  private configCheckedAt = 0;
+  private offerRetryAt = 0;
+  private offerVersion = 0;
   private pending: Promise<CrossDeviceSnapshot> | null = null;
   private offer: Record<string, unknown> | null = null;
   private sessionId = "";
@@ -52,6 +56,8 @@ export class CrossDeviceService {
     this.pending = null;
     this.offer = null;
     this.refreshedAt = 0;
+    this.offerCheckedAt = this.configCheckedAt = this.offerRetryAt = 0;
+    this.offerVersion++;
     this.sessionId = this.sourceKey = this.stateKey = "";
     this.latestSource = null;
     this.publishJob = null;
@@ -74,22 +80,41 @@ export class CrossDeviceService {
   async refresh(): Promise<CrossDeviceSnapshot> {
     const signal = this.context();
     if (this.pending) return this.pending;
-    if (Date.now() - this.refreshedAt < 60_000) return this.snapshot;
+    // 历史缓存不应遮住新设备的续播入口；焦点读取限频，不增加后台轮询。
+    if (
+      Date.now() < this.offerRetryAt ||
+      (this.offerCheckedAt && Date.now() - this.offerCheckedAt < 10_000)
+    )
+      return this.snapshot;
+    const offerVersion = this.offerVersion;
     const job = (async () => {
-      const account = await this.options.transport.call("account", {}, signal);
-      const accountId = z
-        .object({ account: z.object({ id: z.union([z.number(), z.string()]).transform(String) }) })
-        .parse(account).account.id;
-      const recent = await this.options.transport.call("recentSongs", { limit: 300 }, signal);
+      let accountId = this.snapshot.accountId;
+      let records = this.snapshot.records;
+      if (!accountId || Date.now() - this.refreshedAt >= 60_000) {
+        const account = await this.options.transport.call("account", {}, signal);
+        accountId = z
+          .object({
+            account: z.object({ id: z.union([z.number(), z.string()]).transform(String) }),
+          })
+          .parse(account).account.id;
+        const recent = await this.options.transport.call("recentSongs", { limit: 300 }, signal);
+        signal.throwIfAborted();
+        records = decodeRecentSongs(recent);
+        this.refreshedAt = Date.now();
+      }
       let offer: Record<string, unknown> | null = null;
+      let resumeError: string | undefined;
       // 最近播放成功时，续播入口异常不应把已取得的历史一起丢掉。
       try {
-        const config = await this.options.transport.call("relayConfig", {}, signal);
-        signal.throwIfAborted();
-        this.serverEnabled = (config.data as { enable?: boolean } | undefined)?.enable === true;
-        const size = (config.data as { snapshotSize?: unknown } | undefined)?.snapshotSize;
-        if (typeof size === "number" && Number.isInteger(size) && size > 0)
-          this.snapshotSize = Math.min(size, 1000);
+        if (this.serverEnabled === null || Date.now() - this.configCheckedAt >= 60_000) {
+          const config = await this.options.transport.call("relayConfig", {}, signal);
+          signal.throwIfAborted();
+          this.serverEnabled = (config.data as { enable?: boolean } | undefined)?.enable === true;
+          const size = (config.data as { snapshotSize?: unknown } | undefined)?.snapshotSize;
+          if (typeof size === "number" && Number.isInteger(size) && size > 0)
+            this.snapshotSize = Math.min(size, 1000);
+          this.configCheckedAt = Date.now();
+        }
         if (this.serverEnabled) {
           const position = await this.options.transport.call(
             "relayPosition",
@@ -112,13 +137,20 @@ export class CrossDeviceService {
             .safeParse(value);
           if (parsed.success && JSON.stringify(parsed.data).length <= 16_000) offer = parsed.data;
         }
-      } catch {
+      } catch (error) {
         signal.throwIfAborted();
+        const message = error instanceof Error ? error.message : "offline";
+        if (["auth-required", "account-changed", "disabled"].includes(message)) throw error;
+        resumeError = /^(rate-limited|api-\d+|http-\d+|request-timeout|offline)$/.test(message)
+          ? message
+          : "offline";
+        if (message === "rate-limited") this.offerRetryAt = Date.now() + 60_000;
       }
       signal.throwIfAborted();
-      this.offer = offer;
-      this.snapshot = { accountId, records: decodeRecentSongs(recent), canResume: !!offer };
-      this.refreshedAt = Date.now();
+      // 领取过程中开始的旧读取不能重新启用已经消费的邀请入口。
+      if (offerVersion === this.offerVersion) this.offer = offer;
+      this.snapshot = { accountId, records, canResume: !!this.offer, resumeError };
+      this.offerCheckedAt = Date.now();
       return this.snapshot;
     })();
     this.pending = job;
@@ -135,6 +167,7 @@ export class CrossDeviceService {
     if (!this.options.playbackAllowed()) throw new Error("already-in-room");
     const offer = this.offer;
     if (!offer) throw new Error("no-resume");
+    this.offerVersion++;
     this.offer = null;
     this.snapshot = { ...this.snapshot, canResume: false };
     const raw = await this.options.transport.call(
@@ -221,6 +254,7 @@ export class CrossDeviceService {
         const config = await this.options.transport.call("relayConfig", {}, signal);
         signal.throwIfAborted();
         this.serverEnabled = (config.data as { enable?: boolean } | undefined)?.enable === true;
+        this.configCheckedAt = Date.now();
         const size = (config.data as { snapshotSize?: unknown } | undefined)?.snapshotSize;
         if (typeof size === "number" && Number.isInteger(size) && size > 0)
           this.snapshotSize = Math.min(size, 1000);

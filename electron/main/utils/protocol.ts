@@ -59,14 +59,16 @@ const cacheHandler = (request: Request): Response | Promise<Response> => {
  * 格式：cache://covers/xxx.jpg、cache://artists/xxx.jpg
  */
 export const handleCacheProtocol = (): void => {
-  protocol.handle(SCHEME, cacheHandler);
+  if (!protocol.isProtocolHandled(SCHEME)) protocol.handle(SCHEME, cacheHandler);
 };
 
 /**
  * 在指定 partition 的 session 上注册 cache:// 协议处理
  */
 export const handleCacheProtocolOnPartition = (partition: string): void => {
-  session.fromPartition(partition).protocol.handle(SCHEME, cacheHandler);
+  const partitionProtocol = session.fromPartition(partition).protocol;
+  // Session 比窗口长寿；Mac 重建窗口时保留已有处理器，不重复注册或先撤销。
+  if (!partitionProtocol.isProtocolHandled(SCHEME)) partitionProtocol.handle(SCHEME, cacheHandler);
 };
 
 /**

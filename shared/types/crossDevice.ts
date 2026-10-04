@@ -13,6 +13,7 @@ export interface CrossDeviceSnapshot {
   accountId: string;
   records: RemotePlayRecord[];
   canResume: boolean;
+  resumeError?: string;
 }
 
 export interface CrossDevicePlayback {

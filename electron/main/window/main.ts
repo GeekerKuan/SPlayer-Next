@@ -6,7 +6,7 @@ import { initThumbar } from "@main/services/thumbar";
 import { enableTaskbarThumbnail } from "@main/services/thumbnail";
 import { initTray } from "@main/services/tray";
 import { store } from "@main/store";
-import { handleCacheProtocolOnPartition, MAIN_PARTITION } from "@main/utils/protocol";
+import { MAIN_PARTITION } from "@main/utils/protocol";
 import { isAppQuitting } from "@main/utils/lifecycle";
 import { broadcast } from "@main/utils/broadcast";
 import { isWin } from "@main/utils/config";
@@ -24,12 +24,13 @@ let mainWindow: BrowserWindow | null = null;
 /**
  * 创建主窗口
  */
-export const createMainWindow = (): BrowserWindow => {
+export const createMainWindow = (): BrowserWindow | null => {
+  if (isAppQuitting()) return null;
+  const existing = getMainWindow();
+  if (existing) return existing;
   const remember = store.get("system.rememberWindowState") ?? true;
   const saved = remember ? store.get("windowStates.main") : undefined;
 
-  // 注册 cache:// 协议
-  handleCacheProtocolOnPartition(MAIN_PARTITION);
   const borderlessWindow = store.get("system.borderlessWindow") ?? true;
 
   mainWindow = createWindow({

@@ -653,7 +653,9 @@
     "clear": "Clear history",
     "clearConfirmTitle": "Clear Play History",
     "clearConfirmContent": "Clear all play history? This cannot be undone.",
-    "resumeOtherDevice": "Continue from another device"
+    "resumeOtherDevice": "Continue from another device",
+    "checkOtherDevice": "Check other devices",
+    "resumeLimited": "The server is limiting resume checks. Please try again later"
   },
   "download": {
     "title": "Downloads",
@@ -2511,7 +2513,14 @@
       "useRoomAdd": "During Listen Together, choose “Add to Listen Together” in the song menu.",
       "roomRecommendedMode": "Room recommendations",
       "noRoomRecommendations": "No room recommendations yet. Try your recommendations or listening history.",
-      "heartModeActive": "Heart recommendations active"
+      "heartModeActive": "Heart recommendations active",
+      "previewTitle": "Listen together invitation",
+      "previewFrom": "{name} invites you to listen together",
+      "invitationSong": "Song shared with this invitation",
+      "previewLoading": "Reading invitation…",
+      "noInvitationSong": "Song details are unavailable. The room song will sync after joining.",
+      "inviteExpired": "This invitation has expired or the room is unavailable.",
+      "viewCurrentRoom": "View current room"
     },
     "chooseDetail": "Select a message on the left to view details",
     "openPlayer": "Expand player",

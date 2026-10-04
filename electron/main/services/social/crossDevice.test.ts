@@ -27,6 +27,7 @@ const fixture = (override?: NativeTransport["call"]) => {
     data: Record<string, unknown>;
     signal: AbortSignal;
   }[] = [];
+  let positionHook: (() => Promise<void>) | undefined;
   const service = new CrossDeviceService({
     transport: {
       call: async (operation, data, signal) => {
@@ -36,7 +37,8 @@ const fixture = (override?: NativeTransport["call"]) => {
         if (operation === "recentSongs")
           return { code: 200, data: { list: [rows(3, 10), rows(3, 20), rows(4, 15)] } };
         if (operation === "relayConfig") return { code: 200, data: { enable: true } };
-        if (operation === "relayPosition")
+        if (operation === "relayPosition") {
+          await positionHook?.();
           return {
             code: 200,
             data: {
@@ -45,6 +47,7 @@ const fixture = (override?: NativeTransport["call"]) => {
               ],
             },
           };
+        }
         if (operation === "relayPull")
           return {
             code: 200,
@@ -69,6 +72,9 @@ const fixture = (override?: NativeTransport["call"]) => {
   return {
     service,
     calls,
+    onPosition: (hook: () => Promise<void>) => {
+      positionHook = hook;
+    },
     account: () => {
       token = "b";
     },
@@ -143,6 +149,81 @@ test("a late read cannot repopulate a cancelled account cache", async () => {
   f.service.cancel();
   release({ data: { list: [rows(3, 20)] } });
   await assert.rejects(pending, /abort/i);
+});
+
+test("a new device offer is checked independently from the minute-long history cache", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: Date.now() });
+  let available = false;
+  const f = fixture(async (op) => {
+    if (op === "account") return { account: { id: 1 } };
+    if (op === "recentSongs") return { data: { list: [rows(3, 20)] } };
+    if (op === "relayConfig") return { data: { enable: true } };
+    return {
+      data: { commonResourceList: available ? [{ generalizedObject: { deviceId: "phone" } }] : [] },
+    };
+  });
+  assert.equal((await f.service.refresh()).canResume, false);
+  available = true;
+  t.mock.timers.tick(5000);
+  assert.equal((await f.service.refresh()).canResume, false);
+  t.mock.timers.tick(5000);
+  assert.equal((await f.service.refresh()).canResume, true);
+  assert.equal(f.calls.filter((call) => call.operation === "recentSongs").length, 1);
+  assert.equal(f.calls.filter((call) => call.operation === "relayConfig").length, 1);
+  assert.equal(f.calls.filter((call) => call.operation === "relayPosition").length, 2);
+});
+
+test("confirmed query limits preserve history and back off without repeated network calls", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: Date.now() });
+  let limited = true;
+  const f = fixture(async (op) => {
+    if (op === "account") return { account: { id: 1 } };
+    if (op === "recentSongs") return { data: { list: [rows(3, 20)] } };
+    if (op === "relayConfig") return { data: { enable: true } };
+    if (limited) throw new Error("rate-limited");
+    return { data: { commonResourceList: [{ generalizedObject: { deviceId: "phone" } }] } };
+  });
+  const first = await f.service.refresh();
+  assert.equal(first.records.length, 1);
+  assert.equal(first.resumeError, "rate-limited");
+  limited = false;
+  t.mock.timers.tick(15000);
+  await f.service.refresh();
+  assert.equal(f.calls.filter((call) => call.operation === "relayPosition").length, 1);
+  t.mock.timers.tick(45000);
+  const next = await f.service.refresh();
+  assert.equal(next.canResume, true);
+  assert.equal(next.resumeError, undefined);
+});
+
+test("an in-flight offer read cannot resurrect an offer consumed by explicit resume", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: Date.now() });
+  const f = fixture();
+  await f.service.refresh();
+  let release!: () => void;
+  f.onPosition(
+    () =>
+      new Promise<void>((resolve) => {
+        release = resolve;
+      }),
+  );
+  t.mock.timers.tick(10000);
+  const refresh = f.service.refresh();
+  assert.ok(release);
+  await f.service.resume();
+  release();
+  assert.equal((await refresh).canResume, false);
+  await assert.rejects(f.service.resume(), /no-resume/);
+  assert.equal(f.calls.filter((call) => call.operation === "relayPull").length, 1);
+});
+
+test("expired relay authentication remains an error instead of being reported as an empty offer", async () => {
+  const f = fixture(async (op) => {
+    if (op === "account") return { account: { id: 1 } };
+    if (op === "recentSongs") return { data: { list: [] } };
+    throw new Error("auth-required");
+  });
+  await assert.rejects(f.service.refresh(), /auth-required/);
 });
 
 test("resume uses only the server offer, preserves queue order and does not seek songs to remote progress", async () => {

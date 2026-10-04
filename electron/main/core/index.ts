@@ -30,7 +30,13 @@ import {
   init as initPlaybackBridge,
   dispose as disposePlaybackBridge,
 } from "@main/plugins/playbackBridge";
-import { registerCacheScheme, handleCacheProtocol } from "@main/utils/protocol";
+import {
+  registerCacheScheme,
+  handleCacheProtocol,
+  handleCacheProtocolOnPartition,
+  MAIN_PARTITION,
+} from "@main/utils/protocol";
+import { isAppQuitting } from "@main/utils/lifecycle";
 import { startServer, stopServer } from "@main/server";
 import { startMcpServer, stopMcpServer } from "@main/services/mcp/http";
 import { initUpdater, disposeUpdater } from "@main/services/updater";
@@ -112,9 +118,11 @@ export const initApp = (): void => {
   registerCacheScheme();
   // 其他初始化
   app.whenReady().then(() => {
+    if (isAppQuitting()) return;
     electronApp.setAppUserModelId("top.imsyy.splayer-next");
     // 注册 cache:// 协议处理
     handleCacheProtocol();
+    handleCacheProtocolOnPartition(MAIN_PARTITION);
     app.on("browser-window-created", (_, window) => {
       optimizer.watchWindowShortcuts(window);
     });
@@ -170,6 +178,8 @@ export const initApp = (): void => {
     setTimeout(logProcessMemory, MEMORY_LOG_FIRST_DELAY_MS);
     setInterval(logProcessMemory, MEMORY_LOG_INTERVAL_MS);
     app.on("activate", () => {
+      // 退出时的 Dock/系统激活不能创建新窗口或重新启动已清理的服务。
+      if (isAppQuitting()) return;
       if (isMac) {
         if (getMainWindow()) focusMainWindow();
         else createMainWindow();

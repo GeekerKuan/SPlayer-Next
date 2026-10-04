@@ -653,7 +653,9 @@
     "clear": "清空历史",
     "clearConfirmTitle": "清空播放历史",
     "clearConfirmContent": "确认清空全部播放历史吗？此操作不可撤销！",
-    "resumeOtherDevice": "接续其他设备播放"
+    "resumeOtherDevice": "接续其他设备播放",
+    "checkOtherDevice": "检查其他设备播放",
+    "resumeLimited": "续播查询暂受服务端限制，请稍后再试"
   },
   "download": {
     "title": "下载管理",
@@ -2511,7 +2513,14 @@
       "useRoomAdd": "一起听期间，请从歌曲菜单选择“添加到一起听”",
       "roomRecommendedMode": "房间推荐",
       "noRoomRecommendations": "房间暂未提供推荐，可先使用我的推荐或播放历史。",
-      "heartModeActive": "心动推荐中"
+      "heartModeActive": "心动推荐中",
+      "previewTitle": "好友邀请你一起听歌",
+      "previewFrom": "{name} 邀请你一起听歌",
+      "invitationSong": "邀请时的歌曲",
+      "previewLoading": "正在读取邀请信息…",
+      "noInvitationSong": "此邀请未提供可读取的歌曲信息，加入后同步房间歌曲。",
+      "inviteExpired": "该邀请已失效或房间暂不可加入。",
+      "viewCurrentRoom": "查看当前房间"
     },
     "chooseDetail": "请选择左侧消息查看详情",
     "openPlayer": "展开播放界面",

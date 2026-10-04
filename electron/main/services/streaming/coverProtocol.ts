@@ -41,6 +41,7 @@ const handleCover = async (request: Request): Promise<Response> => {
 
 /** 注册流媒体封面协议 */
 export const registerStreamingCoverProtocol = (): void => {
-  protocol.handle(SCHEME, handleCover);
-  session.fromPartition(MAIN_PARTITION).protocol.handle(SCHEME, handleCover);
+  if (!protocol.isProtocolHandled(SCHEME)) protocol.handle(SCHEME, handleCover);
+  const partitionProtocol = session.fromPartition(MAIN_PARTITION).protocol;
+  if (!partitionProtocol.isProtocolHandled(SCHEME)) partitionProtocol.handle(SCHEME, handleCover);
 };

@@ -7,6 +7,14 @@ export interface TogetherClipboardInvite {
   url: string;
   marked: boolean;
   invitation: TogetherInvitation | null;
+  songId?: string;
+}
+
+export interface TogetherInvitePreview {
+  inviter: { id: string; name: string; avatar?: string };
+  song?: TogetherSong;
+  joinable?: boolean;
+  hint?: string;
 }
 
 export interface TogetherSong {
@@ -61,6 +69,8 @@ export interface TogetherApi {
   closeExternal: (expectedRoomId: string) => Promise<SocialResult<TogetherSnapshot>>;
   joinLink: (invitation: TogetherInvitation) => Promise<SocialResult<TogetherSnapshot>>;
   readClipboardInvite: () => Promise<SocialResult<TogetherClipboardInvite | null>>;
+  previewInvite: (invite: TogetherClipboardInvite) => Promise<SocialResult<TogetherInvitePreview>>;
+  cancelPreview: () => Promise<SocialResult<void>>;
   openInviteLink: (url: string) => Promise<SocialResult<void>>;
   accept: (peerId: string, messageId: string) => Promise<SocialResult<TogetherSnapshot>>;
   leave: () => Promise<SocialResult<TogetherSnapshot>>;

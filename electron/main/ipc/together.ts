@@ -5,6 +5,7 @@ import {
   extractTogetherShare,
   isTogetherShortLink,
   parseTogetherLink,
+  parseTogetherSongId,
 } from "@shared/utils/togetherLink";
 import type { TogetherClipboardInvite } from "@shared/types/together";
 import { z } from "zod";
@@ -19,6 +20,7 @@ import type { SocialResult } from "@shared/types/social";
 export const registerTogetherIpc = (): void => {
   const pending = new Set<string>();
   let clipboardDigest = "";
+  let previewController: AbortController | null = null;
   const handle = <T>(channel: string, operation: (args: unknown[]) => Promise<T>): void => {
     ipcMain.handle(`together:${channel}`, async (event, ...args): Promise<SocialResult<T>> => {
       const window = getMainWindow();
@@ -127,6 +129,7 @@ export const registerTogetherIpc = (): void => {
       return null;
     }
     let invitation = parseTogetherLink(share.url);
+    let songId = parseTogetherSongId(share.url);
     if (!invitation && isTogetherShortLink(share.url)) {
       // 仅跟随受限平台短链的重定向，不带登录 Cookie，也不下载跳转后的页面。
       let url = share.url;
@@ -145,6 +148,7 @@ export const registerTogetherIpc = (): void => {
           if (![301, 302, 303, 307, 308].includes(response.status) || !location) break;
           url = new URL(location, url).href;
           invitation = parseTogetherLink(url);
+          songId = parseTogetherSongId(url);
           if (invitation || !isTogetherShortLink(url)) break;
         }
       } catch {
@@ -157,7 +161,48 @@ export const registerTogetherIpc = (): void => {
     }
     if (!getMainWindow()?.isFocused()) return null;
     clipboardDigest = digest;
-    return { ...share, invitation };
+    return { ...share, invitation, ...(songId ? { songId } : {}) };
+  });
+  handle("cancelPreview", async (args) => {
+    z.tuple([]).parse(args);
+    previewController?.abort();
+    previewController = null;
+  });
+  handle("previewInvite", async (args) => {
+    const [invite] = z
+      .tuple([
+        z
+          .object({
+            url: z.string().max(4096),
+            marked: z.boolean(),
+            invitation: z.object({ roomId: roomIdSchema, inviterId: socialPeer }).strict(),
+            songId: socialPeer.optional(),
+          })
+          .strict(),
+      ])
+      .parse(args);
+    if (!isTogetherShortLink(invite.url) && !parseTogetherLink(invite.url))
+      throw new Error("invalid-input");
+    const window = getMainWindow()!;
+    if (!window.isFocused()) throw new Error("cancelled");
+    previewController?.abort();
+    const controller = new AbortController();
+    previewController = controller;
+    const cancel = (): void => controller.abort();
+    const timeout = setTimeout(cancel, 8000);
+    window.once("blur", cancel);
+    window.webContents.once("destroyed", cancel);
+    try {
+      return await togetherService.previewInvite(invite, controller.signal);
+    } catch (error) {
+      if (controller.signal.aborted) throw new Error("cancelled");
+      throw error;
+    } finally {
+      clearTimeout(timeout);
+      window.removeListener("blur", cancel);
+      window.webContents.removeListener("destroyed", cancel);
+      if (previewController === controller) previewController = null;
+    }
   });
   handle("openInviteLink", async (args) => {
     const [url] = z.tuple([z.string().max(4096)]).parse(args);

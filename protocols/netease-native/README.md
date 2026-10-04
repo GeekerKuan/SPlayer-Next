@@ -54,3 +54,5 @@ PC eapi 域名 `https://interfacepc.music.163.com`；签名 `/api/...`，HTTP `/
 短链生成单次请求，拒绝任意 host、带凭证或非法路径的响应；失败回退已经构造并校验的 H5。解码短链最多三次重定向、八秒，随主窗口失焦或销毁中止。成功 HTTP 响应、字段测试和双端用户体验分别列证据，不能互相替代。
 
 协议示例和脱敏成功码见 [fixtures/iteration-2026-10-04.json](./fixtures/iteration-2026-10-04.json)。仅含合成 ID，不含账号、设备标识、Cookie 或真实房间链接。短链字段的开源参考见 [Music163Api-Go 接口定义](https://github.com/XiaoMengXinX/Music163Api-Go/blob/master/api/shortURL.go)，实际响应经本机重新验证。
+
+邀请预览额外复用原项目 `user_detail_new` 的 eapi 路径 `/api/w/v1/user/detail/{id}`（all=true、userId）；仅用于未知好友资料读取，失败保留 UID 占位，尚无本轮官方 PC 抓包样本。歌曲元数据复用已核验的 roomSongs，songId 不进入入房参数。预览只读、有界、可取消，不建立房间心跳。续播入口缓存与历史缓存分离，明确限流后冷却；原写入参数不变。详见 [生命周期与预览](../../docs/social/lifecycle-relay-invites.md)。

@@ -1,5 +1,7 @@
 name: Build social desktop installers
 
+# 本轮统一构建退出、续播状态与用户确认邀请预览修复。
+
 on:
   push:
     branches: [social-together]
@@ -139,4 +141,3 @@ jobs:
             echo "Packaged Electron, native modules and SQLite checked. Packages are unsigned; macOS is not notarized."
             echo "Existing user data compatibility and live two-account acceptance still require user verification."
           } >> "$GITHUB_STEP_SUMMARY"
-

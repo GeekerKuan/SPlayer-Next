@@ -14,3 +14,4 @@
 
 工作流更新推送至 `social-together` 时自动构建，普通源码提交不会自动打包。之后也可手动运行，`source_ref` 填 `social-together` 或已验证的 commit。仅上传 Actions 产物，不创建 Release 或向官方上游发布。
 
+当前修复说明见 [退出、续播与邀请预览](./lifecycle-relay-invites.md)。下载时核对 BUILDINFO.json 的源码提交；前一轮成功产物不包含后续修复。

@@ -3,6 +3,14 @@ import type { TogetherInvitation } from "../types/together";
 /** 隐形标记只用于识别应用分享，不作为鉴权或房间归属依据。 */
 export const TOGETHER_SHARE_MARKER = "@Splayer\u200B-Next";
 
+/** 歌曲只用于预览，不加入接受邀请的协议参数。 */
+export const parseTogetherSongId = (raw: string): string | undefined => {
+  if (!parseTogetherLink(raw)) return;
+  const params = new URL(raw).searchParams;
+  const id = params.get("songId") || "";
+  return params.getAll("songId").length === 1 && /^[1-9]\d{0,19}$/.test(id) ? id : undefined;
+};
+
 export const parseTogetherLink = (raw: string): TogetherInvitation | null => {
   try {
     const url = new URL(raw);

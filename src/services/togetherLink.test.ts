@@ -4,6 +4,7 @@ import {
   extractTogetherShare,
   isTogetherShortLink,
   parseTogetherLink,
+  parseTogetherSongId,
   TOGETHER_SHARE_MARKER,
 } from "../../shared/utils/togetherLink";
 
@@ -11,6 +12,10 @@ test("clipboard invitations accept platform links and the application marker wit
   const link =
     "https://st.music.163.com/listen-together/share/?roomId=room-test&inviterId=2&songId=3";
   assert.deepEqual(parseTogetherLink(link), { roomId: "room-test", inviterId: "2" });
+  assert.equal(parseTogetherSongId(link), "3");
+  assert.equal(parseTogetherSongId(`${link}&songId=4`), undefined);
+  assert.equal(parseTogetherSongId(link.replace("songId=3", "songId=bad")), undefined);
+  assert.equal(parseTogetherSongId(link.replace("st.music.163.com", "evil.test")), undefined);
   assert.deepEqual(extractTogetherShare(`我的耳机分你一半 ${link} ${TOGETHER_SHARE_MARKER}`), {
     url: link,
     marked: true,

@@ -4,6 +4,7 @@ import { setTimeout as delay } from "node:timers/promises";
 /** 此表只描述社交通道，不路由到原有音乐 API 模块。 */
 export const nativeEndpoints = {
   account: "/api/w/nuser/account/get",
+  userDetail: "/api/w/v1/user/detail/",
   conversations: "/api/msg/private/users",
   history: "/api/msg/private/history",
   send: "/api/msg/private/send",
@@ -80,6 +81,12 @@ export const createNativeTransport = (options: NativeTransportOptions): NativeTr
     if (!cookies.MUSIC_U) throw new NativeSocialError("auth-required");
     let path: string = nativeEndpoints[operation];
     if (operation === "comment") path += String(data.uid);
+    // 复用原项目 user_detail_new 的 eapi 路径和参数，限定数字 ID。
+    if (operation === "userDetail") {
+      if (!/^[1-9]\d{0,19}$/.test(String(data.userId)))
+        throw new NativeSocialError("invalid-input");
+      path += String(data.userId);
+    }
     const header: Record<string, string> = {
       os: "pc",
       appver: "3.1.29.205117",
