@@ -7,6 +7,7 @@ export interface SVirtualListExposed {
   actualStartIndex: number;
   scrollTo: (top: number, behavior?: ScrollBehavior) => void;
   scrollToIndex: (index: number, behavior?: ScrollBehavior) => void;
+  scrollToBottom: () => void;
   getScrollTop: () => number;
   getItemTop: (index: number) => number;
   getDropInfoByOffset: (offsetY: number) => { index: number; position: "top" | "bottom" };
@@ -35,6 +36,10 @@ export interface SVirtualListProps<T> {
   hideScrollbar?: boolean;
   /** 封面主题色 */
   cover?: boolean;
+  /** 聊天列表追加和测量时保持贴底；向上滚动后由调用方关闭。 */
+  followBottom?: boolean;
+  /** 变高列表更新时保留当前可见项的像素位置。 */
+  preserveAnchor?: boolean;
 }
 
 const props = withDefaults(defineProps<SVirtualListProps<T>>(), {
@@ -70,15 +75,37 @@ const viewportHeight = computed(() => scrollViewportHeight.value || 0);
 // 每项实际高度、累积顶部位置（仅动态高度模式）
 const itemHeights = shallowRef<number[]>([]);
 const itemTops = shallowRef<number[]>([]);
+let itemKeys: (string | number)[] = [];
+let disposed = false;
+let measureTimer: ReturnType<typeof setTimeout> | undefined;
+
+const anchor = (): { key: string | number; offset: number } | undefined => {
+  if (!props.preserveAnchor || props.followBottom) return undefined;
+  const top = scrollRef.value?.scrollTop ?? scrollTop.value;
+  const index = itemTops.value.findIndex(
+    (value, i) => value + itemHeights.value[i] > top - props.paddingTop,
+  );
+  if (index >= 0 && itemKeys[index] !== undefined)
+    return { key: itemKeys[index], offset: top - getItemTop(index) };
+  return undefined;
+};
+const restoreAnchor = (saved: ReturnType<typeof anchor>): void => {
+  if (disposed) return;
+  if (props.followBottom) {
+    scrollToBottom();
+  } else if (saved) {
+    const index = itemKeys.indexOf(saved.key);
+    if (index >= 0) scrollToPosition(getItemTop(index) + saved.offset);
+  }
+};
 
 /** 初始化高度数组，复用已测量的值 */
 const initializeHeights = (): void => {
   if (props.itemFixed) return;
-  const length = props.items.length;
-  if (itemHeights.value.length !== length) {
-    const old = itemHeights.value;
-    itemHeights.value = Array.from({ length }, (_, idx) => old[idx] || props.itemHeight);
-  }
+  // 按消息键复用高度；前插历史时不能把旧索引的高度套到新消息上。缓存仅保留当前列表。
+  const measured = new Map(itemKeys.map((key, i) => [key, itemHeights.value[i]]));
+  itemKeys = props.items.map(props.getItemKey);
+  itemHeights.value = itemKeys.map((key) => measured.get(key) || props.itemHeight);
   updateTops();
 };
 
@@ -174,7 +201,8 @@ const visibleItems = computed(() => {
 
 /** 测量可见项的真实 DOM 高度，允许 0.5px 误差 */
 const measureItemHeights = (): void => {
-  if (props.itemFixed || !itemRefs.value.length || props.items.length === 0) return;
+  if (disposed || props.itemFixed || !itemRefs.value.length || props.items.length === 0) return;
+  const saved = anchor();
   let hasChanges = false;
   itemRefs.value.forEach((element) => {
     if (!element) return;
@@ -191,10 +219,19 @@ const measureItemHeights = (): void => {
   if (hasChanges) {
     triggerRef(itemHeights);
     updateTops();
+    restoreAnchor(saved);
+    calculateVisibleRange(scrollTop.value);
   }
 };
 
-const debouncedMeasure = useDebounceFn(measureItemHeights, 50);
+const debouncedMeasure = (): void => {
+  if (disposed) return;
+  clearTimeout(measureTimer);
+  measureTimer = setTimeout(() => {
+    measureTimer = undefined;
+    measureItemHeights();
+  }, 50);
+};
 
 let rafId: number | null = null;
 let pendingScrollTarget: HTMLElement | null = null;
@@ -264,7 +301,19 @@ const getDropInfoByOffset = (offsetY: number): { index: number; position: "top" 
 
 /** 滚动到指定像素位置 */
 const scrollToPosition = (top: number, behavior: ScrollBehavior = "auto"): void => {
+  if (disposed) return;
+  scrollTop.value = Math.max(0, top);
+  calculateVisibleRange(scrollTop.value);
   scrollRef.value?.scrollTo({ top, behavior });
+};
+
+/** 先定位最后一屏，再在本轮 DOM 测量后纠正到真实底部。 */
+const scrollToBottom = (): void => {
+  scrollToPosition(Math.max(0, totalHeight.value + props.paddingBottom - viewportHeight.value));
+  nextTick(() => {
+    if (disposed) return;
+    scrollToPosition(Math.max(0, totalHeight.value + props.paddingBottom - viewportHeight.value));
+  });
 };
 
 /** 滚动到指定索引项 */
@@ -285,26 +334,31 @@ const scrollToIndex = (index: number, behavior: ScrollBehavior = "auto"): void =
 const getScrollTop = (): number => scrollTop.value;
 
 watch(
-  () => props.items,
+  () => [props.items, props.items.length],
   () => {
+    const saved = anchor();
     initializeHeights();
+    restoreAnchor(saved);
     calculateVisibleRange(scrollTop.value);
     nextTick(debouncedMeasure);
   },
   { deep: false },
 );
 
-watch(
-  () => props.items.length,
-  () => {
-    initializeHeights();
-    calculateVisibleRange(scrollTop.value);
-  },
-);
+useResizeObserver(itemRefs, () => {
+  if (!props.itemFixed && !disposed) debouncedMeasure();
+});
 
 watch(viewportHeight, () => {
   calculateVisibleRange(scrollTop.value);
+  if (props.followBottom) scrollToBottom();
 });
+watch(
+  () => props.followBottom,
+  (value) => {
+    if (value) scrollToBottom();
+  },
+);
 
 watch(
   () => [actualStartIndex.value, actualEndIndex.value],
@@ -347,6 +401,8 @@ onActivated(() => {
 });
 
 onUnmounted(() => {
+  disposed = true;
+  clearTimeout(measureTimer);
   if (rafId !== null) {
     cancelAnimationFrame(rafId);
     rafId = null;
@@ -360,6 +416,7 @@ defineExpose({
   actualStartIndex,
   scrollTo: scrollToPosition,
   scrollToIndex,
+  scrollToBottom,
   getScrollTop,
   getItemTop,
   getDropInfoByOffset,
@@ -395,7 +452,7 @@ defineExpose({
           :style="{
             height: `${totalHeight}px`,
             position: 'relative',
-            transition: 'height 0.3s ease',
+            transition: preserveAnchor || followBottom ? undefined : 'height 0.3s ease',
           }"
         >
           <div ref="contentRef" class="absolute inset-x-0 top-0">

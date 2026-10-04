@@ -10,6 +10,10 @@ import IconLucideClock from "~icons/lucide/clock";
 import IconLucideRepeat2 from "~icons/lucide/repeat-2";
 import IconLucideRadio from "~icons/lucide/radio";
 import IconLucideAudioWaveform from "~icons/lucide/audio-waveform";
+import IconLucideHeadphones from "~icons/lucide/headphones";
+import { useTogetherDialog } from "@/composables/useTogetherDialog";
+import { useTogetherStore } from "@/stores/together";
+import { useTogetherPresence } from "@/composables/useTogetherPresence";
 
 const props = withDefaults(
   defineProps<{
@@ -60,9 +64,18 @@ const speedOpen = ref(false);
 const autoCloseOpen = ref(false);
 const abLoopOpen = ref(false);
 const fmModeOpen = ref(false);
+const togetherDialog = useTogetherDialog();
+const together = useTogetherStore();
+const { active: inTogether } = useTogetherPresence();
 
 const moreMenuItems = computed<DropdownMenuItem[]>(() => [
   { key: "audioInfo", label: t("quality.outputInfo"), icon: IconLucideAudioWaveform },
+  {
+    key: "together",
+    label: t(inTogether.value ? "social.together.leave" : "social.tabs.room"),
+    icon: IconLucideHeadphones,
+    disabled: together.busy,
+  },
   { key: "equalizer", label: t("equalizer.title"), icon: IconLucideSliders },
   { key: "speed", label: t("speed.title"), icon: IconLucideGauge },
   { key: "abLoop", label: t("abLoop.title"), icon: IconLucideRepeat2 },
@@ -71,7 +84,13 @@ const moreMenuItems = computed<DropdownMenuItem[]>(() => [
 
 const onMoreMenuSelect = (key: string): void => {
   if (key === "audioInfo") status.audioInfoOpen = true;
-  else if (key === "equalizer") equalizerOpen.value = true;
+  else if (key === "together") {
+    if (inTogether.value)
+      void together.leave().then((ok) => {
+        if (!ok) togetherDialog.show();
+      });
+    else togetherDialog.show();
+  } else if (key === "equalizer") equalizerOpen.value = true;
   else if (key === "speed") speedOpen.value = true;
   else if (key === "abLoop") abLoopOpen.value = true;
   else if (key === "autoClose") autoCloseOpen.value = true;
@@ -82,6 +101,24 @@ const onMoreMenuSelect = (key: string): void => {
   <div class="flex items-center gap-1">
     <!-- 在线音质 -->
     <QualityControl v-if="settings.appearance.showQualitySwitch" :cover="cover" />
+    <div
+      class="together-toolbar-entry"
+      :class="{ 'is-active': inTogether }"
+      :aria-hidden="!inTogether"
+      :inert="!inTogether"
+    >
+      <SButton
+        :type="buttonType"
+        variant="ghost"
+        circle
+        size="large"
+        :class="mutedClass"
+        :title="t('social.tabs.room')"
+        @click="togetherDialog.show()"
+      >
+        <template #icon><IconLucideHeadphones /></template>
+      </SButton>
+    </div>
     <SPopover trigger="hover" side="top" :cover="cover" content-class="px-3 pb-2 pt-3">
       <template #trigger>
         <SButton
@@ -194,3 +231,33 @@ const onMoreMenuSelect = (key: string): void => {
     <FmModeDialog v-model:open="fmModeOpen" />
   </div>
 </template>
+
+<style scoped>
+.together-toolbar-entry {
+  width: 0;
+  margin-right: -4px;
+  opacity: 0;
+  transform: scale(0.82);
+  filter: blur(4px);
+  pointer-events: none;
+  transition:
+    width var(--together-duration) var(--together-easing),
+    margin var(--together-duration) var(--together-easing),
+    opacity var(--together-duration) var(--together-easing),
+    transform var(--together-duration) var(--together-easing),
+    filter var(--together-duration) var(--together-easing);
+}
+.together-toolbar-entry.is-active {
+  width: 40px;
+  margin-right: 0;
+  opacity: 1;
+  transform: scale(1);
+  filter: blur(0);
+  pointer-events: auto;
+}
+@media (prefers-reduced-motion: reduce) {
+  .together-toolbar-entry {
+    transition: none;
+  }
+}
+</style>

@@ -39,6 +39,11 @@ import { ErrorCode } from "@shared/types/errors";
 import { shouldSkipKeywordTrack } from "@/utils/preset/skipKeywords";
 import { toast } from "@/composables/useToast";
 import i18n from "@/i18n";
+import {
+  ownsTogetherPlayback,
+  controlTogetherPlayback,
+  playTogetherTrack,
+} from "@/services/togetherSession";
 
 /** 加载运行时选项 */
 interface LoadRuntimeOptions {
@@ -159,8 +164,7 @@ export const load = async (
   // 切歌即清空 AB 循环（per-song 状态）
   abLoop.reset();
   // 清除上一次 seek 残留
-  seekTarget = null;
-  playback.setSeeking(false);
+  clearLocalSeek();
   resetForLoad(meta?.duration ?? 0, options.transitionResult?.data?.playback);
   // 非本地并行歌词与取色
   const isOnline = meta?.source !== "local";
@@ -238,6 +242,7 @@ const resolveTrackSourceWithRetry = (
   resolveTrackSource(track, {
     silent: true,
     onError,
+    officialOnly: ownsTogetherPlayback(),
     skipOfficialOnline: retry.skipOfficialOnline,
     skipPluginIds: [...retry.skippedPluginIds],
   });
@@ -252,6 +257,7 @@ const markRetryableSourceFailure = (
   resolved: ResolvedTrackSource,
   retry: SourceRetryState,
 ): boolean => {
+  if (ownsTogetherPlayback()) return false;
   if (resolved.provider === "official" && !retry.skipOfficialOnline) {
     retry.skipOfficialOnline = true;
     return true;
@@ -340,6 +346,10 @@ const loadTrack = async (
   transitionSource?: ResolvedTrackSource,
 ): Promise<void> => {
   if (!track) return;
+  if (ownsTogetherPlayback()) {
+    await playTogetherTrack(track);
+    return;
+  }
   // 跳过指定关键词歌曲
   const settings = useSettingsStore();
   if (
@@ -508,6 +518,10 @@ let pendingPlayAfterRestore = false;
 
 /** 恢复播放 */
 export const play = async (): Promise<void> => {
+  if (ownsTogetherPlayback()) {
+    await controlTogetherPlayback({ action: "resume" });
+    return;
+  }
   const status = useStatusStore();
   if (isRestoringLastTrack) {
     pendingPlayAfterRestore = true;
@@ -548,6 +562,10 @@ export const togglePlay = (): void => {
 
 /** 暂停播放 */
 export const pause = async (): Promise<void> => {
+  if (ownsTogetherPlayback()) {
+    await controlTogetherPlayback({ action: "pause" });
+    return;
+  }
   const status = useStatusStore();
   const prev = status.state;
   status.state = "paused";
@@ -568,6 +586,10 @@ export const invalidatePlaybackOperation = (): number => {
 
 /** 停止播放并重置进度 */
 export const stop = async (): Promise<void> => {
+  if (ownsTogetherPlayback()) {
+    await controlTogetherPlayback({ action: "pause" });
+    return;
+  }
   const token = invalidatePlaybackOperation();
   invalidateNextTrackPreload();
   const status = useStatusStore();
@@ -575,6 +597,7 @@ export const stop = async (): Promise<void> => {
   const result = await window.api.player.stop();
   if (token !== trackToken) return;
   if (result.success) {
+    clearLocalSeek();
     status.state = "stopped";
     status.position = 0;
     playback.reset();
@@ -586,6 +609,17 @@ export const stop = async (): Promise<void> => {
  * 后端推送的 position 必须接近此值才会被接受
  */
 let seekTarget: number | null = null;
+let seekTimer: ReturnType<typeof setTimeout> | null = null;
+let seekSerial = 0;
+
+/** 切歌、退出或引擎确认时必须清掉目标与截止定时器，不能永久冻结位置推送。 */
+export const clearLocalSeek = (): void => {
+  seekSerial++;
+  if (seekTimer) clearTimeout(seekTimer);
+  seekTimer = null;
+  seekTarget = null;
+  playback.setSeeking(false);
+};
 
 /**
  * 判断后端推送的 position 是否已到达 seek 目标附近
@@ -596,8 +630,7 @@ export const hasReachedSeekTarget = (position: number): boolean => {
   if (seekTarget === null) return true;
   // 容差：后端推送的位置在 seek 目标 ±1s 内视为已到达
   if (Math.abs(position - seekTarget) < 1000) {
-    seekTarget = null;
-    playback.setSeeking(false);
+    clearLocalSeek();
     return true;
   }
   return false;
@@ -611,25 +644,30 @@ export const isSeeking = (): boolean => seekTarget !== null;
  * @param posMs - 目标位置（毫秒）
  */
 export const seek = async (posMs: number): Promise<void> => {
+  if (ownsTogetherPlayback()) {
+    await controlTogetherPlayback({ action: "seek", positionMs: posMs });
+    return;
+  }
+  await seekLocally(posMs);
+};
+
+/** 房间与普通播放器共用本机跳转，远端校准不再次上报房间控制。 */
+export const seekLocally = async (posMs: number): Promise<void> => {
   const status = useStatusStore();
   // 歌曲加载中 seek 无意义：引擎此刻没有可 seek 的解码线程，
   // 且 seekTarget 残留会让加载完成后的 position 推送被持续丢弃
   if (status.trackLoading) return;
-  const token = invalidatePlaybackOperation();
   // 先冻结插值，再写入位置
-  playback.setSeeking(true);
-  status.position = posMs;
-  playback.setCurrentTime(posMs);
-
-  // 设置 seek 目标，屏蔽旧 position 推送
-  seekTarget = posMs;
+  markSeek(posMs);
+  const token = trackToken;
+  const serial = seekSerial;
 
   const result = await window.api.player.seek(posMs);
-  if (token !== trackToken) return;
+  if (token !== trackToken || serial !== seekSerial) return;
   if (result.success) {
     status.position = posMs;
     playback.setCurrentTime(posMs);
-  }
+  } else clearLocalSeek();
 };
 
 /**
@@ -640,10 +678,12 @@ export const markSeek = (posMs: number): void => {
   const status = useStatusStore();
   if (status.trackLoading) return;
   invalidatePlaybackOperation();
+  clearLocalSeek();
   playback.setSeeking(true);
   status.position = posMs;
   playback.setCurrentTime(posMs);
   seekTarget = posMs;
+  seekTimer = setTimeout(clearLocalSeek, 1500);
 };
 
 /**
@@ -701,6 +741,7 @@ export const setVolume = async (vol: number): Promise<void> => {
  * @param v - 速度（0.5 ~ 2.0）
  */
 export const setSpeed = async (v: number): Promise<void> => {
+  if (ownsTogetherPlayback()) return;
   const safe = Number.isFinite(v) ? Math.max(0.5, Math.min(2.0, v)) : 1.0;
   const result = await window.api.player.setSpeed(safe);
   if (result.success) {
@@ -763,6 +804,10 @@ export const playFrom = async (
   context?: PlaybackContext,
 ): Promise<void> => {
   if (items.length === 0) return;
+  if (ownsTogetherPlayback()) {
+    await playTogetherTrack(items[Math.max(0, Math.min(startIndex, items.length - 1))]);
+    return;
+  }
   const status = useStatusStore();
   const media = useMediaStore();
   // 退出特殊模式
@@ -900,6 +945,10 @@ export const dislikeFmTrack = async (): Promise<void> => {
  * @param autoPlay - 是否自动播放
  */
 export const nextTrack = async (autoPlay = true): Promise<void> => {
+  if (ownsTogetherPlayback()) {
+    await controlTogetherPlayback({ action: "next" });
+    return;
+  }
   const status = useStatusStore();
   // 私人 FM
   if (status.fmMode) {
@@ -1031,6 +1080,11 @@ export const trySmartTransition = async (
  * @param index - 队列位置
  */
 export const playAtIndex = async (index: number): Promise<void> => {
+  if (ownsTogetherPlayback()) {
+    const item = queue.queue.value[index];
+    if (item) await playTogetherTrack(item);
+    return;
+  }
   const status = useStatusStore();
   if (index < 0 || index >= queue.queueLength.value) return;
   if (index === status.playIndex) {
@@ -1045,6 +1099,10 @@ export const playAtIndex = async (index: number): Promise<void> => {
 
 /** 播放上一首，首位时回绕到末尾 */
 export const prevTrack = async (): Promise<void> => {
+  if (ownsTogetherPlayback()) {
+    await controlTogetherPlayback({ action: "previous" });
+    return;
+  }
   const status = useStatusStore();
   if (status.fmMode) return;
   if (queue.queueLength.value === 0) return;
@@ -1078,6 +1136,7 @@ const syncPlayMode = (): void => {
  * @param mode - list（列表循环）、one（单曲循环）
  */
 export const setRepeatMode = (mode: RepeatMode): void => {
+  if (ownsTogetherPlayback()) return;
   const status = useStatusStore();
   if (status.repeatMode === mode) return;
   status.repeatMode = mode;
@@ -1104,6 +1163,7 @@ export const toggleShuffleMode = (): void => {
  * @param mode - off（顺序）、on（随机）
  */
 export const setShuffleMode = (mode: ShuffleMode): void => {
+  if (ownsTogetherPlayback()) return;
   const status = useStatusStore();
   // 心动模式下忽略
   if (status.heartMode) return;
@@ -1182,6 +1242,10 @@ export const insertToQueue = (
   afterIndex?: number,
   context?: PlaybackContext,
 ): number => {
+  if (ownsTogetherPlayback()) {
+    toast.error(i18n.global.t("social.together.useRoomAdd"));
+    return -1;
+  }
   const status = useStatusStore();
   const len = queue.queue.value.length;
   const raw = afterIndex ?? status.playIndex + 1;
@@ -1215,6 +1279,10 @@ export const insertManyToQueue = (
   context?: PlaybackContext,
 ): number => {
   if (items.length === 0) return 0;
+  if (ownsTogetherPlayback()) {
+    toast.error(i18n.global.t("social.together.useRoomAdd"));
+    return 0;
+  }
   const status = useStatusStore();
   const seen = new Set(queue.queue.value.map((track) => track.id));
   const fresh: Track[] = [];
@@ -1234,6 +1302,10 @@ export const insertManyToQueue = (
  * 如果是当前正在播放的歌曲则继续播放，不重新加载
  */
 export const playNow = async (item: Track, context?: PlaybackContext): Promise<void> => {
+  if (ownsTogetherPlayback()) {
+    await playTogetherTrack(item);
+    return;
+  }
   const status = useStatusStore();
   const media = useMediaStore();
   // 同一首歌且已成功加载

@@ -9,6 +9,10 @@ import { getPlayer } from "@main/services/engine";
 import { sendToMain } from "@main/utils/broadcast";
 import { toMs } from "@main/utils/time";
 import type { ShuffleMode, RepeatMode, Track } from "@shared/types/player";
+import {
+  isTogetherPlaybackLocked,
+  routeTogetherControl,
+} from "@main/services/social/playbackOwnership";
 
 /**
  * 跳转（毫秒）
@@ -17,17 +21,40 @@ import type { ShuffleMode, RepeatMode, Track } from "@shared/types/player";
  * @param positionMs - 目标位置（毫秒）
  */
 const seek = (positionMs: number): Promise<void> => {
+  const room = routeTogetherControl({ action: "seek", positionMs });
+  if (room) return room.then(() => {});
   sendToMain("player:event", { type: "seek", data: { position: positionMs } });
   return getPlayer().seek(positionMs / 1000);
 };
 
 export const playerControl = {
-  play: (): void =>
+  play: (): void => {
+    const room = routeTogetherControl({ action: "resume" });
+    if (room) {
+      void room.catch(() => {});
+      return;
+    }
+    if (isTogetherPlaybackLocked()) return;
     void getPlayer()
       .play()
-      .catch(() => {}),
-  pause: (): void => getPlayer().pause(),
-  stop: (): void => getPlayer().stop(),
+      .catch(() => {});
+  },
+  pause: (): void => {
+    const room = routeTogetherControl({ action: "pause" });
+    if (room) {
+      void room.catch(() => {});
+      return;
+    }
+    getPlayer().pause();
+  },
+  stop: (): void => {
+    const room = routeTogetherControl({ action: "pause" });
+    if (room) {
+      void room.catch(() => {});
+      return;
+    }
+    getPlayer().stop();
+  },
   next: (): void => sendToMain("player:event", { type: "next" }),
   prev: (): void => sendToMain("player:event", { type: "prev" }),
   setShuffle: (mode: ShuffleMode): void =>

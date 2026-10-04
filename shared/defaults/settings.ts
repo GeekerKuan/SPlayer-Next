@@ -13,6 +13,7 @@ export const DYNAMIC_ISLAND_BASE_HEIGHT = 40;
 /** 默认配置 */
 export const defaultSystemConfig: SystemConfig = {
   player: {
+    crossDeviceResume: true,
     autoPlay: false,
     rememberLastTrack: true,
     fadeEnabled: true,
@@ -168,6 +169,9 @@ export const defaultSystemConfig: SystemConfig = {
     neteaseScrobbleEnabled: false,
     neteaseScrobbleMode: "ncbl",
     registerOrpheusProtocol: false,
+    socialDesktopExecutable: "",
+    socialTogetherMode: "native",
+    socialNotifications: true,
   },
   windowStates: {
     main: {

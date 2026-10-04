@@ -1,11 +1,13 @@
-import { useSettingsStore } from "@/stores/settings";
 import type { SettingCategory } from "@/types/settings-schema";
+import TogetherClientSetting from "@/components/settings/custom/TogetherClientSetting.vue";
 import DeviceSelector from "@/components/settings/custom/DeviceSelector.vue";
 import { isWin } from "@/utils/config";
 import IconLucidePlay from "~icons/lucide/play";
 import { getActiveDeviceId } from "@/core/player";
 import { setDeviceVolume } from "@/services/deviceVolume";
 import { useStatusStore } from "@/stores/status";
+import { useSettingsStore } from "@/stores/settings";
+import { useTogetherStore } from "@/stores/together";
 
 const playerCategory: SettingCategory = {
   id: "player",
@@ -14,6 +16,12 @@ const playerCategory: SettingCategory = {
     {
       id: "playControl",
       items: [
+        {
+          key: "crossDeviceResume",
+          type: "switch",
+          binding: { store: "settings", path: "system.player.crossDeviceResume" },
+          defaultValue: true,
+        },
         {
           key: "autoPlay",
           type: "switch",
@@ -35,24 +43,6 @@ const playerCategory: SettingCategory = {
             { value: "all", labelKey: "settings.searchPlayBehavior.all" },
           ],
           defaultValue: "current",
-        },
-        {
-          key: "fadeEnabled",
-          type: "switch",
-          binding: { store: "settings", path: "system.player.fadeEnabled" },
-          defaultValue: true,
-          children: [
-            {
-              key: "fadeDuration",
-              type: "slider",
-              binding: { store: "settings", path: "system.player.fadeDuration" },
-              min: 100,
-              max: 600,
-              step: 100,
-              defaultValue: 200,
-              marks: { 100: "100", 200: "200", 600: "600" },
-            },
-          ],
         },
         {
           key: "loudnessNormalization",
@@ -158,6 +148,67 @@ const playerCategory: SettingCategory = {
           ],
           childrenCondition: () => useSettingsStore().player.transitionMode === "crossfade",
           hideChildren: true,
+        },
+      ],
+    },
+    {
+      id: "playTransition",
+      items: [
+        {
+          key: "fadeEnabled",
+          type: "switch",
+          binding: { store: "settings", path: "system.player.fadeEnabled" },
+          defaultValue: true,
+          children: [
+            {
+              key: "fadeDuration",
+              type: "slider",
+              binding: { store: "settings", path: "system.player.fadeDuration" },
+              min: 100,
+              max: 600,
+              step: 100,
+              defaultValue: 200,
+              marks: { 100: "100", 200: "200", 600: "600" },
+            },
+          ],
+        },
+      ],
+    },
+    {
+      id: "listenTogether",
+      tag: { text: "Beta" },
+      items: [
+        {
+          key: "togetherAvatarsInBar",
+          type: "switch",
+          binding: { store: "settings", path: "player.togetherAvatarsInBar" },
+          defaultValue: true,
+        },
+        {
+          key: "togetherAvatarsInFullPlayer",
+          type: "switch",
+          binding: { store: "settings", path: "player.togetherAvatarsInFullPlayer" },
+          defaultValue: true,
+        },
+        {
+          key: "socialTogetherMode",
+          type: "select",
+          binding: { store: "settings", path: "system.system.socialTogetherMode" },
+          options: [
+            { value: "native", labelKey: "settings.socialTogetherMode.native" },
+            { value: "desktop-cdp", labelKey: "settings.socialTogetherMode.desktop" },
+          ],
+          defaultValue: "native",
+          visible: () => isWin,
+          disabled: () => !!useTogetherStore().snapshot.roomId,
+        },
+        {
+          key: "socialDesktopExecutable",
+          type: "custom",
+          component: TogetherClientSetting,
+          fullWidth: true,
+          visible: () =>
+            isWin && useSettingsStore().system.system.socialTogetherMode === "desktop-cdp",
         },
       ],
     },

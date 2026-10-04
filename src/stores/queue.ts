@@ -1,5 +1,11 @@
 import localforage from "localforage";
-import type { PlaybackContext, PlaybackQueueItem, Track } from "@shared/types/player";
+import type {
+  PlaybackContext,
+  PlaybackQueueItem,
+  RepeatMode,
+  ShuffleMode,
+  Track,
+} from "@shared/types/player";
 
 /** 持久化存储实例 */
 const db = localforage.createInstance({ name: "splayer", storeName: "queue" });
@@ -36,10 +42,80 @@ export const originalQueue = shallowRef<PlaybackQueueItem[] | null>(null);
 /** 队列中的歌曲总数 */
 export const queueLength = computed(() => queue.value.length);
 
+export interface TemporaryPlaybackState {
+  playIndex: number;
+  position: number;
+  duration: number;
+  repeatMode: RepeatMode;
+  shuffleMode: ShuffleMode;
+  heartMode: boolean;
+  fmMode: boolean;
+}
+let temporaryBackup: {
+  entries: PlaybackQueueItem[];
+  original: PlaybackQueueItem[] | null;
+  playback: TemporaryPlaybackState;
+} | null = null;
+let preparedPlayback: {
+  entries: PlaybackQueueItem[];
+  state: TemporaryPlaybackState;
+} | null = null;
+
+/** 入房确认前保护记忆位置；失败时释放，普通队列变化后不复用旧状态。 */
+export const prepareTemporaryPlayback = (state: TemporaryPlaybackState): void => {
+  if (!temporaryBackup && !preparedPlayback)
+    preparedPlayback = { entries: queueEntries.value, state: { ...state } };
+};
+export const discardPreparedPlayback = (): void => {
+  preparedPlayback = null;
+};
+export const getPersistentQueuePlaybackState = (): TemporaryPlaybackState | null =>
+  temporaryBackup?.playback ||
+  (preparedPlayback?.entries === queueEntries.value ? preparedPlayback.state : null);
+
+/** 临时房间只借用原播放器的队列视图，不覆盖持久化的普通播放列表。 */
+export const setTemporaryQueue = (
+  items: readonly Track[],
+  context: PlaybackContext,
+  playback: TemporaryPlaybackState,
+): void => {
+  temporaryBackup ||= {
+    entries: queueEntries.value,
+    original: originalQueue.value,
+    playback: {
+      ...(preparedPlayback?.entries === queueEntries.value ? preparedPlayback.state : playback),
+    },
+  };
+  preparedPlayback = null;
+  queueEntries.value = items.map((track) => createQueueItem(track, context));
+  originalQueue.value = null;
+};
+
+/** 只保留一份原队列引用；退出、注销和卸载均释放房间列表与备份。 */
+export const restoreTemporaryQueue = (): TemporaryPlaybackState | null => {
+  preparedPlayback = null;
+  if (!temporaryBackup) return null;
+  const backup = temporaryBackup;
+  temporaryBackup = null;
+  queueEntries.value = backup.entries;
+  originalQueue.value = backup.original;
+  return backup.playback;
+};
+
+/** status 的持久化索引和模式必须与持久化普通队列对应。 */
+export const getTemporaryPlaybackState = (): TemporaryPlaybackState | null =>
+  temporaryBackup?.playback || null;
+
 /** 保存当前播放列表数据 */
-const save = (): void => {
-  db.setItem("playList", toRaw(queueEntries.value)).catch(console.error);
-  db.setItem("originalPlayList", toRaw(originalQueue.value)).catch(console.error);
+const save = (includeOrdinaryBackup = false): void => {
+  if (temporaryBackup && !includeOrdinaryBackup) return;
+  db.setItem("playList", toRaw(temporaryBackup?.entries || queueEntries.value)).catch(
+    console.error,
+  );
+  db.setItem(
+    "originalPlayList",
+    toRaw(temporaryBackup ? temporaryBackup.original : originalQueue.value),
+  ).catch(console.error);
 };
 
 /** 恢复播放列表数据 */
@@ -50,8 +126,15 @@ export const restoreQueue = async (): Promise<void> => {
       db.getItem<PersistedQueueItem[] | null>("originalPlayList"),
     ]);
     if (!list?.length) return;
-    queueEntries.value = list.map(restoreQueueItem);
-    originalQueue.value = original?.map(restoreQueueItem) ?? null;
+    const entries = list.map(restoreQueueItem);
+    const restoredOriginal = original?.map(restoreQueueItem) ?? null;
+    if (temporaryBackup) {
+      temporaryBackup.entries = entries;
+      temporaryBackup.original = restoredOriginal;
+    } else {
+      queueEntries.value = entries;
+      originalQueue.value = restoredOriginal;
+    }
   } catch (e) {
     console.error("[queue] 恢复持久化数据失败:", e);
   }
@@ -109,27 +192,36 @@ export const insertManyToQueue = (
 };
 
 /**
- * 按 id 替换队列中的曲目数据（标签编辑后同步显示）
+ * 按来源、服务器与 id 替换曲目，防止临时在线歌曲覆盖同 ID 的其他音源
  * @param updates - 更新后的 Track 列表
  */
 export const updateQueueTracks = (updates: readonly Track[]): void => {
   if (updates.length === 0) return;
-  const byId = new Map(updates.map((item) => [item.id, item]));
+  const identity = (track: Track): string =>
+    JSON.stringify([track.source, track.serverId, track.id]);
+  const byId = new Map(updates.map((item) => [identity(item), item]));
   const touched =
-    queueEntries.value.some((item) => byId.has(item.track.id)) ||
-    (originalQueue.value?.some((item) => byId.has(item.track.id)) ?? false);
+    queueEntries.value.some((item) => byId.has(identity(item.track))) ||
+    (originalQueue.value?.some((item) => byId.has(identity(item.track))) ?? false) ||
+    temporaryBackup?.entries.some((item) => byId.has(identity(item.track)));
   if (!touched) return;
   queueEntries.value = queueEntries.value.map((item) => ({
     ...item,
-    track: byId.get(item.track.id) ?? item.track,
+    track: byId.get(identity(item.track)) ?? item.track,
   }));
   if (originalQueue.value) {
     originalQueue.value = originalQueue.value.map((item) => ({
       ...item,
-      track: byId.get(item.track.id) ?? item.track,
+      track: byId.get(identity(item.track)) ?? item.track,
     }));
   }
-  save();
+  if (temporaryBackup) {
+    const replace = (items: PlaybackQueueItem[]): PlaybackQueueItem[] =>
+      items.map((item) => ({ ...item, track: byId.get(identity(item.track)) ?? item.track }));
+    temporaryBackup.entries = replace(temporaryBackup.entries);
+    if (temporaryBackup.original) temporaryBackup.original = replace(temporaryBackup.original);
+  }
+  save(true);
 };
 
 /**
@@ -162,6 +254,20 @@ export const removeServerTracks = (serverId: string): void => {
     track.source === "streaming" && track.serverId === serverId;
   const next = queueEntries.value.filter((item) => !belongsToServer(item.track));
   const nextOriginal = originalQueue.value?.filter((item) => !belongsToServer(item.track)) ?? null;
+  if (temporaryBackup) {
+    const selected = temporaryBackup.entries[temporaryBackup.playback.playIndex];
+    temporaryBackup.entries = temporaryBackup.entries.filter(
+      (item) => !belongsToServer(item.track),
+    );
+    temporaryBackup.original =
+      temporaryBackup.original?.filter((item) => !belongsToServer(item.track)) ?? null;
+    temporaryBackup.playback.playIndex = selected ? temporaryBackup.entries.indexOf(selected) : -1;
+    if (temporaryBackup.playback.playIndex < 0) {
+      temporaryBackup.playback.position = 0;
+      temporaryBackup.playback.duration = 0;
+    }
+    save(true);
+  }
   if (
     next.length === queueEntries.value.length &&
     nextOriginal?.length === originalQueue.value?.length

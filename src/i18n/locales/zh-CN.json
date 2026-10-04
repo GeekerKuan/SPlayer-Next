@@ -22,10 +22,22 @@
       "subtitle": "一个现代化的桌面音乐播放器，完成几步设置即可开始享用",
       "start": "开始设置",
       "features": {
-        "local": { "title": "本地音乐库", "desc": "扫描本地目录，自动整理音乐库" },
-        "quality": { "title": "无损音质", "desc": "原生音频引擎，支持多种无损格式" },
-        "streaming": { "title": "流媒体服务器", "desc": "Subsonic / Jellyfin / Emby 等" },
-        "lyrics": { "title": "丰富歌词体验", "desc": "AMLL 逐字歌词，桌面歌词、灵动岛、任务栏歌词" }
+        "local": {
+          "title": "本地音乐库",
+          "desc": "扫描本地目录，自动整理音乐库"
+        },
+        "quality": {
+          "title": "无损音质",
+          "desc": "原生音频引擎，支持多种无损格式"
+        },
+        "streaming": {
+          "title": "流媒体服务器",
+          "desc": "Subsonic / Jellyfin / Emby 等"
+        },
+        "lyrics": {
+          "title": "丰富歌词体验",
+          "desc": "AMLL 逐字歌词，桌面歌词、灵动岛、任务栏歌词"
+        }
       }
     },
     "agreement": {
@@ -640,7 +652,8 @@
     "empty": "还没有播放记录，先去随便听点什么吧",
     "clear": "清空历史",
     "clearConfirmTitle": "清空播放历史",
-    "clearConfirmContent": "确认清空全部播放历史吗？此操作不可撤销！"
+    "clearConfirmContent": "确认清空全部播放历史吗？此操作不可撤销！",
+    "resumeOtherDevice": "接续其他设备播放"
   },
   "download": {
     "title": "下载管理",
@@ -731,7 +744,8 @@
       "localCache": "本地与缓存",
       "plugins": "插件管理",
       "other": "其他设置",
-      "about": "关于软件"
+      "about": "关于软件",
+      "messages": "消息设置"
     },
     "section": {
       "platformLogin": "平台登录",
@@ -787,7 +801,10 @@
       "backupReset": "备份与重置",
       "debug": "调试",
       "preset": "强迫症配置",
-      "envInfo": "环境信息"
+      "envInfo": "环境信息",
+      "messageNotifications": "消息通知",
+      "playTransition": "播放过渡",
+      "listenTogether": "一起听歌"
     },
     "about": {
       "checkUpdate": "检查更新",
@@ -1792,8 +1809,8 @@
       "concept": "概念版"
     },
     "neteaseScrobbleEnabled": {
-      "label": "启用听歌打卡",
-      "description": "播放达到一定时长后，自动向 NCM 上报听歌记录"
+      "label": "同步网易云播放状态",
+      "description": "按桌面客户端行为同步当前歌曲、进度、播放模式和听歌记录"
     },
     "neteaseScrobbleMode": {
       "label": "NCM 听歌打卡方式",
@@ -2014,9 +2031,18 @@
         "homepage": "主页"
       },
       "grant": {
-        "network": { "label": "联网", "desc": "插件可发起网络请求" },
-        "control": { "label": "控制", "desc": "插件可控制播放器" },
-        "ui": { "label": "界面", "desc": "插件可扩展或修改应用界面" }
+        "network": {
+          "label": "联网",
+          "desc": "插件可发起网络请求"
+        },
+        "control": {
+          "label": "控制",
+          "desc": "插件可控制播放器"
+        },
+        "ui": {
+          "label": "界面",
+          "desc": "插件可扩展或修改应用界面"
+        }
       }
     },
     "pluginManager": {
@@ -2162,6 +2188,32 @@
       "button": "清空全部",
       "confirmTitle": "清空全部数据库缓存？",
       "confirmDesc": "将删除上方全部数据库缓存，操作不可恢复"
+    },
+    "socialNotifications": {
+      "label": "系统消息通知",
+      "description": "后台检查网易云私信与邀请，显示 Windows 原生通知；不显示私信正文"
+    },
+    "socialDesktopExecutable": {
+      "label": "Windows 网易云音乐客户端",
+      "description": "选择已开启本机 9229 调试端口的官方客户端；一起听只使用网易云歌曲与官方客户端播放"
+    },
+    "socialTogetherMode": {
+      "label": "一起听歌实现方式",
+      "description": "默认由 SPlayer 独立播放与维持房间；退出房间后可切换方式",
+      "native": "SPlayer 独立实现（默认）",
+      "desktop": "官方 Windows 客户端（CDP）"
+    },
+    "togetherAvatarsInBar": {
+      "label": "播放栏显示一起听头像",
+      "description": "一起听时以成员头像替换小封面，加入后头像叠合"
+    },
+    "togetherAvatarsInFullPlayer": {
+      "label": "全屏播放页显示一起听头像",
+      "description": "在封面上方显示成员及服务端听歌时长，封面下移缩小"
+    },
+    "crossDeviceResume": {
+      "label": "跨端续播",
+      "description": "拉取其他设备的最近播放，支持接续服务端提供的歌曲会话"
     }
   },
   "collection": {
@@ -2287,7 +2339,8 @@
     "TAG_READ_FAILED": "读取标签失败",
     "TAG_WRITE_FAILED": "写入标签失败",
     "MAX_CONSECUTIVE_FAILURES": "连续播放失败次数过多",
-    "UNKNOWN": "操作失败"
+    "UNKNOWN": "操作失败",
+    "TOGETHER_PLAYBACK_LOCKED": "一起听期间仅支持网易云歌曲；退出房间后恢复普通播放"
   },
   "tagEditor": {
     "title": "编辑元数据",
@@ -2309,5 +2362,167 @@
       "discNumber": "碟号",
       "lyrics": "内嵌歌词"
     }
+  },
+  "social": {
+    "title": "消息",
+    "refresh": "刷新",
+    "more": "加载更多",
+    "older": "加载更早消息",
+    "newMessages": "有新消息，跳到最新",
+    "localRead": "已读仅记录在本机",
+    "compose": "输入消息…",
+    "send": "发送",
+    "sendHint": "Enter 发送 · Shift+Enter 换行",
+    "choose": "选择一个会话",
+    "login": "登录网易云账号后查看消息",
+    "empty": "暂无消息",
+    "invite": "一起听邀请",
+    "accept": "接受",
+    "inviteUnavailable": "此客户端尚未验证原生邀请操作",
+    "dismissInvite": "在本机忽略",
+    "invitationDismissed": "已在本机忽略邀请",
+    "unsupported": "暂不支持的消息",
+    "unsupportedHint": "此消息的原生卡片格式尚未适配，可在官方客户端查看。",
+    "tabs": {
+      "chat": "私信",
+      "notice": "通知",
+      "mention": "提及我",
+      "comment": "评论",
+      "room": "一起听歌"
+    },
+    "status": {
+      "online": "已连接",
+      "offline": "离线缓存",
+      "auth-required": "需要登录"
+    },
+    "delivery": {
+      "sent": "已发送",
+      "sending": "发送中",
+      "failed": "发送失败",
+      "unknown": "结果未知，请刷新历史核对"
+    },
+    "errors": {
+      "auth-required": "登录已过期，请重新登录",
+      "offline": "网络不可用，可查看缓存并稍后刷新",
+      "rate-limited": "发送过于频繁，请稍后再试",
+      "empty-message": "请输入非空消息",
+      "message-too-long": "消息不能超过 500 字",
+      "send-unknown": "发送结果未知，请刷新历史核对，避免重复发送",
+      "send-failed": "发送失败，草稿已保留",
+      "account-changed": "账号已切换，请重新打开会话",
+      "invalid-input": "输入格式不正确",
+      "cdp-unavailable": "客户端未连接，请确认官方客户端已开启 9229 调试端口",
+      "windows-client-required": "请选择 Windows 网易云音乐 cloudmusic.exe",
+      "unsupported-build": "当前客户端版本尚未验证，暂不执行房间操作",
+      "account-mismatch": "官方客户端和 SPlayer 需登录同一网易云账号",
+      "room-changed": "房间状态已改变，请重新确认后操作",
+      "room-unavailable": "当前没有可操作的房间",
+      "already-in-room": "请先离开当前一起听房间",
+      "invitation-expired": "邀请已过期，请让好友重新邀请",
+      "invalid-song": "只能添加本次网易云推荐中的歌曲",
+      "already-in-queue": "歌曲已在房间歌单中",
+      "queue-full": "房间歌单已达到 500 首上限",
+      "cancelled": "操作已取消",
+      "invalid-position": "进度超过歌曲时长",
+      "operation-unknown": "请求结果不明，请刷新核实，避免重复操作",
+      "room-not-owned": "当前房间尚未由 SPlayer 接管，请退出原房间后重新加入",
+      "mode-in-room": "请先退出房间，再切换实现方式",
+      "room-operation-failed": "房间操作未被服务器确认",
+      "room-expired": "房间或心跳已失效，请重新加入",
+      "no-room-song": "暂无可用的网易云房间歌曲",
+      "room-songs-only": "一起听期间仅能播放房间队列中的网易云歌曲",
+      "room-audio-unavailable": "本账号暂时无法播放房间歌曲，已暂停；不会使用其他平台或插件替代音源",
+      "invalid-room-response": "房间返回了未支持的数据格式，请稍后刷新",
+      "room-invite-owner-only": "仅房主可以发送房间邀请",
+      "native-mode-required": "请切换到客户端内实现后操作",
+      "busy": "正在处理，请稍后重试",
+      "disabled": "此功能已关闭",
+      "no-resume": "暂无可接续的设备会话",
+      "unsupported-resume": "该设备会话暂不支持在本机接续"
+    },
+    "together": {
+      "playbackOwner": "一起听仅支持网易云歌曲，由官方客户端播放；SPlayer 本地音源暂停。",
+      "connect": "连接 / 刷新状态",
+      "chooseClient": "选择客户端",
+      "createInvite": "创建并邀请",
+      "leave": "离开一起听歌",
+      "previous": "上一首",
+      "next": "下一首",
+      "pause": "暂停",
+      "resume": "继续",
+      "noSong": "等待歌曲",
+      "queue": "房间歌单",
+      "recommendations": "推荐歌曲",
+      "recommendationHint": "优先使用房间返回的推荐；未提供时使用当前账号每日推荐。主动加歌不会替换现有队列。",
+      "add": "加入",
+      "inviteHint": "选择要邀请的好友",
+      "noClient": "尚未选择 Windows 网易云音乐客户端",
+      "status": {
+        "alone": "未加入房间",
+        "waiting": "等待好友",
+        "togetherOwner": "房主",
+        "together": "一起听中",
+        "timeout": "房间已超时"
+      },
+      "nativePlayback": "由 SPlayer 播放网易云歌曲；心跳在后台维持，歌词与听歌统计沿用软件原有功能。",
+      "create": "创建房间",
+      "invite": "邀请好友",
+      "desktopCreateInvite": "在官方客户端创建 / 邀请",
+      "recentPeers": "最近会话",
+      "invitePeer": "好友的网易云 UID",
+      "copyLink": "复制邀请链接",
+      "linkHint": "邀请链接用于网易云音乐客户端；房间结束后失效",
+      "replace": "关闭旧房间并新建",
+      "replaceHint": "当前房间由其他客户端建立。将先退出该房间，再在 SPlayer 中新建房间；其他成员的一起听状态可能受到影响。",
+      "inviteFriend": "邀请好友一起听",
+      "waitingFriend": "等待好友加入中…",
+      "reconnecting": "正在恢复房间连接…",
+      "listening": "正在一起听歌",
+      "duration": "一起听了 {hours} 小时 {minutes} 分钟",
+      "debug": "诊断",
+      "friendId": "好友的网易云 ID",
+      "chooseFriend": "选择好友",
+      "shareText": "我的耳机分你一半，和我一起听歌吧～",
+      "createAndCopy": "创建房间并复制邀请",
+      "nowPlaying": "正在播放",
+      "externalRoom": "此账号已在另一个房间",
+      "externalRoomHint": "你可以在本机接管播放，或结束原房间后重新邀请好友。",
+      "takeOver": "接管房间",
+      "takeOverHint": "将由 SPlayer 接管当前房间的网易云播放和心跳。",
+      "closeExternal": "结束原房间",
+      "closeExternalHint": "确认结束当前房间？其他成员也会受到影响。",
+      "pushMode": "歌曲来源",
+      "recommendedMode": "我的推荐",
+      "queueMode": "播放历史",
+      "retry": "重新连接",
+      "openBrowser": "用默认浏览器打开该链接",
+      "fallbackHint": "暂时无法解析邀请，可以在浏览器中继续打开。",
+      "neteaseOnly": "一起听仅播放网易云音乐歌曲",
+      "recommend": "加载推荐",
+      "inviteDescription": "选择好友发送邀请，或复制链接分享给好友。",
+      "linkFallback": "暂时无法解析这条一起听邀请。你可以在浏览器中打开链接继续。",
+      "addToRoom": "添加到一起听",
+      "addedToRoom": "已添加到一起听房间",
+      "useRoomAdd": "一起听期间，请从歌曲菜单选择“添加到一起听”",
+      "roomRecommendedMode": "房间推荐",
+      "noRoomRecommendations": "房间暂未提供推荐，可先使用我的推荐或播放历史。",
+      "heartModeActive": "心动推荐中"
+    },
+    "chooseDetail": "请选择左侧消息查看详情",
+    "openPlayer": "展开播放界面",
+    "cards": {
+      "song": "歌曲",
+      "album": "专辑",
+      "artist": "歌手",
+      "playlist": "歌单",
+      "program": "声音",
+      "mv": "MV",
+      "topic": "文章",
+      "user": "用户",
+      "radio": "播客",
+      "image": "图片",
+      "general": "消息卡片"
+    },
+    "inviteActionHint": "接受后加入对方房间"
   }
 }

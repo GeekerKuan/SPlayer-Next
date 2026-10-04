@@ -65,4 +65,6 @@ export enum ErrorCode {
   MAX_CONSECUTIVE_FAILURES = "MAX_CONSECUTIVE_FAILURES",
   /** 未知错误 */
   UNKNOWN = "UNKNOWN",
+  /** 一起听音频由官方客户端播放，阻止其他音源和本地引擎并行启动。 */
+  TOGETHER_PLAYBACK_LOCKED = "TOGETHER_PLAYBACK_LOCKED",
 }

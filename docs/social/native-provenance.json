@@ -1,0 +1,45 @@
+{
+  "upstreamCommit": "4c60335d092ddd034bbf013f2fb2be938fb1e998",
+  "officialVersion": "1.2.0-nightly.922",
+  "url": "https://github.com/SPlayer-Dev/SPlayer-Next/releases/download/nightly/SPlayer-Next-1.2.0-nightly.922-x64-setup.exe",
+  "installerSha256": "c7762a4d5fa5485953d3b7aaf9d03f46c2797c9f386b14ae2eca527cd86d7fda",
+  "nativeRebuiltLocally": false,
+  "modules": [
+    {
+      "module": "audio-engine",
+      "bytes": 13435392,
+      "sha256": "ca85079ab278c186fb754607f40956f76b0c03dfc10cb694497ef143c5a5e65e",
+      "source": "official nightly.922 resources/native/audio-engine.node"
+    },
+    {
+      "module": "audio-capture",
+      "bytes": 415232,
+      "sha256": "ad46be57f3e60c5dca0a5ec7c4f73dcf28b1427a1e897d9c9714443584cd0437",
+      "source": "official nightly.922 resources/native/audio-capture.node"
+    },
+    {
+      "module": "media-ctrl",
+      "bytes": 1290752,
+      "sha256": "196d5b2fce4fd2a821bc1bb2b7fe4ff1ae54d011d5480b179ce76977bd8fea9f",
+      "source": "official nightly.922 resources/native/media-ctrl.node"
+    },
+    {
+      "module": "taskbar-lyric",
+      "bytes": 594944,
+      "sha256": "876c9687183ecb64e61d37218f0c4cec2f3d4a1b94af2541506f678210d8d298",
+      "source": "official nightly.922 resources/native/taskbar-lyric.node"
+    },
+    {
+      "module": "taskbar-thumbnail",
+      "bytes": 294912,
+      "sha256": "232c205ad968a64fc4546cd81fc8152c087238bc1b3150d6ed16984221bf542f",
+      "source": "official nightly.922 resources/native/taskbar-thumbnail.node"
+    },
+    {
+      "module": "opencc",
+      "bytes": 2625024,
+      "sha256": "ebd870a5c70998d415468cc49714455cf8ef0404c3881f68c99ae2b6b6aeb7be",
+      "source": "official nightly.922 resources/native/opencc.node"
+    }
+  ]
+}

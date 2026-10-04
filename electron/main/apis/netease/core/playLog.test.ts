@@ -69,6 +69,12 @@ describe("网易云 NCBL 播放日志", () => {
     }
   });
 
+  it("区分自然播完与中断切歌", () => {
+    const source = { id: "456", type: "list", name: "list" };
+    assert.equal(buildPld(context, song, source, 180, "playend").end, "playend");
+    assert.equal(buildPld(context, song, source, 60).end, "interrupt");
+  });
+
   it("声音以节目 ID 和 dj 类型写入日志", () => {
     const voice = {
       ...song,

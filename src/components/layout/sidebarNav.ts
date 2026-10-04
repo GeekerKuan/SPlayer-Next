@@ -1,5 +1,6 @@
 import type { Component } from "vue";
 import IconLucideHome from "~icons/lucide/home";
+import IconLucideMessagesSquare from "~icons/lucide/messages-square";
 import IconLucideMusic from "~icons/lucide/music";
 import IconLucideUser from "~icons/lucide/user";
 import IconLucideDisc3 from "~icons/lucide/disc-3";
@@ -24,6 +25,7 @@ export interface SidebarNavEntry {
 }
 
 const SIDEBAR_NAV_ENTRIES: SidebarNavEntry[] = [
+  { key: "/messages", labelKey: "social.title", icon: IconLucideMessagesSquare, hideable: true },
   { key: "/", labelKey: "nav.home", icon: IconLucideHome, hideable: false },
   { key: "/library", labelKey: "nav.library", icon: IconLucideMusic, hideable: true },
   { key: "/artists/local", labelKey: "artist.label", icon: IconLucideUser, hideable: true },

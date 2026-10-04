@@ -4,12 +4,14 @@ defineOptions({ name: "History" });
 import type { PlaybackContext } from "@shared/types/player";
 import type { DropdownMenuItem } from "@/components/ui/SDropdownMenu.vue";
 import { useHistoryStore } from "@/stores/history";
+import { useCrossDeviceStore } from "@/stores/crossDevice";
 import SongList from "@/components/list/SongList.vue";
 import * as player from "@/core/player";
 import IconLucideTrash2 from "~icons/lucide/trash-2";
 
 const { t } = useI18n();
 const history = useHistoryStore();
+const crossDevice = useCrossDeviceStore();
 
 const playbackContext = computed<PlaybackContext>(() => ({
   originId: "history",
@@ -46,6 +48,7 @@ const handleClear = (): void => {
 
 onMounted(() => {
   history.load();
+  void crossDevice.refresh();
 });
 </script>
 
@@ -63,10 +66,23 @@ onMounted(() => {
             <IconLucideMusic class="size-3.5" />
             {{ t("common.totalSongs", { count: history.tracks.length }) }}
           </span>
+          <span v-if="crossDevice.error" role="status" class="text-xs text-error">
+            {{ t(`social.errors.${crossDevice.error}`, t("social.errors.offline")) }}
+          </span>
         </div>
       </div>
       <div class="flex items-center justify-between gap-4">
         <div class="flex items-center gap-3">
+          <SButton
+            v-if="crossDevice.canResume"
+            variant="secondary"
+            round
+            :loading="crossDevice.busy"
+            @click="crossDevice.resume"
+          >
+            <template #icon><IconLucideMonitorSmartphone /></template>
+            {{ t("history.resumeOtherDevice") }}
+          </SButton>
           <SButton
             type="primary"
             variant="secondary"

@@ -21,6 +21,8 @@
 
 ## 功能特性
 
+本工作分支新增原生「消息」、独立一起听、官方短链邀请与跨端历史/续播，见 [模块说明](docs/social/README.md) 和 [当前验证状态](docs/social/iteration-2026-10-04.md)。独立一起听双账号同步已实测；在线上报及对方已读仍缺协议证据。最终安装包尚未重新生成；派生项目继续沿用 AGPL-3.0。
+
 - 🎵 **广泛的格式支持** —— MP3、FLAC、WAV、AAC、OGG、APE 等，基于 FFmpeg 解码
 - 📝 **丰富的歌词** —— LRC / QRC / YRC / TTML，逐字高亮与翻译，支持桌面、灵动岛、任务栏歌词窗口
 - 🌐 **流媒体服务** —— Subsonic / Navidrome / Jellyfin / Emby（多服务器、自动连接）

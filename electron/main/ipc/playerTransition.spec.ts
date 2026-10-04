@@ -159,4 +159,18 @@ describe("交接响应的主进程竞态保护", () => {
     expect(mocks.metadata).toHaveBeenCalledOnce();
     expect(mocks.prepareTransition).toHaveBeenCalledOnce();
   });
+  it("一起听期间不能通过预载或交叉过渡插入本地歌曲", async () => {
+    const ownership = await import("@main/services/social/playbackOwnership");
+    ownership.setNativeTogetherOwnership("room", "10");
+    try {
+      expect(await invoke("player:prepareNext", "slot", "next.wav")).toBe(false);
+      expect(
+        await invoke("player:transitionPrepared", "slot", "next.wav", 5000, "standard", options),
+      ).toMatchObject({ success: false });
+      expect(mocks.transition).not.toHaveBeenCalled();
+      expect(mocks.metadata).not.toHaveBeenCalled();
+    } finally {
+      ownership.setNativeTogetherOwnership("", "");
+    }
+  });
 });

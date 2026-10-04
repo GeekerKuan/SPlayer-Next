@@ -652,7 +652,8 @@
     "empty": "No playback history yet — play something to get started",
     "clear": "Clear history",
     "clearConfirmTitle": "Clear Play History",
-    "clearConfirmContent": "Clear all play history? This cannot be undone."
+    "clearConfirmContent": "Clear all play history? This cannot be undone.",
+    "resumeOtherDevice": "Continue from another device"
   },
   "download": {
     "title": "Downloads",
@@ -743,7 +744,8 @@
       "localCache": "Local & Cache",
       "plugins": "Plugin Manager",
       "other": "Other",
-      "about": "About"
+      "about": "About",
+      "messages": "Message settings"
     },
     "section": {
       "platformLogin": "Platform Login",
@@ -799,7 +801,10 @@
       "backupReset": "Backup & Reset",
       "debug": "Debug",
       "preset": "OCD Settings",
-      "envInfo": "Environment Info"
+      "envInfo": "Environment Info",
+      "messageNotifications": "Message notifications",
+      "playTransition": "Playback transition",
+      "listenTogether": "Listen together"
     },
     "about": {
       "checkUpdate": "Check for Updates",
@@ -1804,8 +1809,8 @@
       "concept": "Concept"
     },
     "neteaseScrobbleEnabled": {
-      "label": "Enable scrobble",
-      "description": "Automatically report listening records to NCM after a track has played long enough"
+      "label": "Sync NCM playback state",
+      "description": "Sync the current track, progress, play mode, and listening history like the desktop client"
     },
     "neteaseScrobbleMode": {
       "label": "NCM scrobble method",
@@ -2026,9 +2031,18 @@
         "homepage": "Homepage"
       },
       "grant": {
-        "network": { "label": "Network", "desc": "Can make network requests" },
-        "control": { "label": "Control", "desc": "Can control the player" },
-        "ui": { "label": "Interface", "desc": "Can extend or modify the app interface" }
+        "network": {
+          "label": "Network",
+          "desc": "Can make network requests"
+        },
+        "control": {
+          "label": "Control",
+          "desc": "Can control the player"
+        },
+        "ui": {
+          "label": "Interface",
+          "desc": "Can extend or modify the app interface"
+        }
       }
     },
     "pluginManager": {
@@ -2174,6 +2188,32 @@
       "button": "Clear All",
       "confirmTitle": "Clear all database caches?",
       "confirmDesc": "All database caches above will be cleared. This cannot be undone."
+    },
+    "socialNotifications": {
+      "label": "System message notifications",
+      "description": "Check NetEase private messages and invitations in the background. Notifications hide private message text."
+    },
+    "socialDesktopExecutable": {
+      "label": "Windows NetEase client",
+      "description": "Choose the official client with local debug port 9229 enabled. Listen-together uses NetEase songs and the official player."
+    },
+    "socialTogetherMode": {
+      "label": "Listen Together implementation",
+      "description": "SPlayer manages playback and the room by default. Leave the room before switching.",
+      "native": "SPlayer native (default)",
+      "desktop": "Official Windows client (CDP)"
+    },
+    "togetherAvatarsInBar": {
+      "label": "Together avatars in player bar",
+      "description": "Replace the small cover with member avatars that overlap after joining"
+    },
+    "togetherAvatarsInFullPlayer": {
+      "label": "Together avatars in full player",
+      "description": "Show members and server listening duration above a smaller, lowered cover"
+    },
+    "crossDeviceResume": {
+      "label": "Cross-device playback",
+      "description": "Show recent plays from other devices and continue available song sessions"
     }
   },
   "collection": {
@@ -2299,7 +2339,8 @@
     "TAG_READ_FAILED": "Failed to read tags",
     "TAG_WRITE_FAILED": "Failed to write tags",
     "MAX_CONSECUTIVE_FAILURES": "Too many consecutive playback failures",
-    "UNKNOWN": "Operation failed"
+    "UNKNOWN": "Operation failed",
+    "TOGETHER_PLAYBACK_LOCKED": "Only NetEase songs are available while listening together; leave the room to resume normal playback"
   },
   "tagEditor": {
     "title": "Edit Metadata",
@@ -2321,5 +2362,167 @@
       "discNumber": "Disc No.",
       "lyrics": "Embedded Lyrics"
     }
+  },
+  "social": {
+    "title": "Messages",
+    "refresh": "Refresh",
+    "more": "Load more",
+    "older": "Load earlier messages",
+    "newMessages": "New messages · Jump to latest",
+    "localRead": "Read status is local",
+    "compose": "Write a message…",
+    "send": "Send",
+    "sendHint": "Enter to send · Shift+Enter for a new line",
+    "choose": "Choose a conversation",
+    "login": "Sign in to NetEase to view messages",
+    "empty": "No messages",
+    "invite": "Listen Together invitation",
+    "accept": "Accept",
+    "inviteUnavailable": "Native invitation actions have not been verified",
+    "dismissInvite": "Dismiss locally",
+    "invitationDismissed": "Invitation dismissed locally",
+    "unsupported": "Unsupported message",
+    "unsupportedHint": "This native card format is not supported yet. View it in the official client.",
+    "tabs": {
+      "chat": "Private messages",
+      "notice": "Notifications",
+      "mention": "Mentions",
+      "comment": "Comments",
+      "room": "Listen together"
+    },
+    "status": {
+      "online": "Connected",
+      "offline": "Offline cache",
+      "auth-required": "Sign in required"
+    },
+    "delivery": {
+      "sent": "Sent",
+      "sending": "Sending",
+      "failed": "Failed",
+      "unknown": "Unknown · Refresh history to check"
+    },
+    "errors": {
+      "auth-required": "Your session expired. Please sign in again",
+      "offline": "Network unavailable. Cached messages remain readable",
+      "rate-limited": "You are sending too frequently. Please wait",
+      "empty-message": "Enter a nonempty message",
+      "message-too-long": "Messages cannot exceed 500 characters",
+      "send-unknown": "Sending status is unknown. Refresh history before sending again",
+      "send-failed": "Sending failed. Your draft was kept",
+      "account-changed": "Account changed. Reopen the conversation",
+      "invalid-input": "Invalid input",
+      "cdp-unavailable": "Client is disconnected. Enable its debug port 9229 first.",
+      "windows-client-required": "Select Windows NetEase cloudmusic.exe",
+      "unsupported-build": "This client build is not verified for room operations",
+      "account-mismatch": "Both apps must use the same NetEase account",
+      "room-changed": "The room changed. Review the current room before trying again.",
+      "room-unavailable": "No active room",
+      "already-in-room": "Leave the current room first",
+      "invitation-expired": "Invitation expired. Ask your friend to invite again.",
+      "invalid-song": "Only current NetEase recommendations can be added",
+      "already-in-queue": "Song is already in the room queue",
+      "queue-full": "The room queue has reached its 500-song limit",
+      "cancelled": "Operation canceled",
+      "invalid-position": "Position exceeds song duration",
+      "operation-unknown": "Result unknown. Refresh to verify before repeating.",
+      "room-not-owned": "SPlayer does not own this room. Leave the existing room and join again.",
+      "mode-in-room": "Leave the room before changing the implementation.",
+      "room-operation-failed": "The server did not confirm the room operation.",
+      "room-expired": "The room or heartbeat expired. Please join again.",
+      "no-room-song": "No NetEase song is available for the room.",
+      "room-songs-only": "Only NetEase songs in the room queue can play during Listen Together.",
+      "room-audio-unavailable": "This account cannot play the room song. Playback is paused; other platforms and plugins will not replace it.",
+      "invalid-room-response": "Unsupported room response. Try refreshing later.",
+      "room-invite-owner-only": "Only the host can send room invitations.",
+      "native-mode-required": "Switch to the built-in mode first.",
+      "busy": "Please try again shortly",
+      "disabled": "This feature is disabled",
+      "no-resume": "No device session is available",
+      "unsupported-resume": "This device session is not supported yet"
+    },
+    "together": {
+      "playbackOwner": "Only NetEase songs are supported. The official client plays room audio; SPlayer local playback is stopped.",
+      "connect": "Connect / refresh status",
+      "chooseClient": "Choose client",
+      "createInvite": "Create and invite",
+      "leave": "Leave Listen Together",
+      "previous": "Previous",
+      "next": "Next",
+      "pause": "Pause",
+      "resume": "Resume",
+      "noSong": "Waiting for a song",
+      "queue": "Room queue",
+      "recommendations": "Recommended songs",
+      "recommendationHint": "Uses room recommendations when available, otherwise your daily recommendations. Adding songs keeps the current queue.",
+      "add": "Add",
+      "inviteHint": "Choose a friend to invite",
+      "noClient": "Windows NetEase client has not been selected",
+      "status": {
+        "alone": "No room",
+        "waiting": "Waiting for friend",
+        "togetherOwner": "Room owner",
+        "together": "Listening together",
+        "timeout": "Room timed out"
+      },
+      "nativePlayback": "SPlayer plays official NetEase audio and maintains the room in the background, using existing lyrics and listening statistics.",
+      "create": "Create room",
+      "invite": "Invite friend",
+      "desktopCreateInvite": "Create / invite in official client",
+      "recentPeers": "Recent conversations",
+      "invitePeer": "Friend’s NetEase UID",
+      "copyLink": "Copy invitation link",
+      "linkHint": "Open invitation links in NetEase Music; links expire when the room ends",
+      "replace": "Close old room and create new",
+      "replaceHint": "Another client created this room. Leave it first, then create a new room in SPlayer. This may affect the other members’ session.",
+      "inviteFriend": "Invite a friend",
+      "waitingFriend": "Waiting for your friend…",
+      "reconnecting": "Reconnecting to the room…",
+      "listening": "Listening together",
+      "duration": "Together for {hours} h {minutes} min",
+      "debug": "Diagnostics",
+      "friendId": "Friend’s NetEase ID",
+      "chooseFriend": "Choose a friend",
+      "shareText": "Share my headphones and listen with me～",
+      "createAndCopy": "Create room and copy invitation",
+      "nowPlaying": "Now playing",
+      "externalRoom": "This account is already in another room",
+      "externalRoomHint": "Take over playback here, or end the existing room to invite again.",
+      "takeOver": "Take over room",
+      "takeOverHint": "SPlayer will take over NetEase playback and the room heartbeat.",
+      "closeExternal": "End existing room",
+      "closeExternalHint": "End this room? Other participants will also be affected.",
+      "pushMode": "Song source",
+      "recommendedMode": "My recommendations",
+      "queueMode": "Play history",
+      "retry": "Reconnect",
+      "openBrowser": "Open this link in your default browser",
+      "fallbackHint": "The invitation could not be resolved. Continue in your browser.",
+      "neteaseOnly": "Listen Together supports NetEase songs only",
+      "recommend": "Load recommendations",
+      "inviteDescription": "Choose a friend to invite, or copy a link to share.",
+      "linkFallback": "This invitation could not be resolved. You can open the link in your browser to continue.",
+      "addToRoom": "Add to Listen Together",
+      "addedToRoom": "Added to the room queue",
+      "useRoomAdd": "During Listen Together, choose “Add to Listen Together” in the song menu.",
+      "roomRecommendedMode": "Room recommendations",
+      "noRoomRecommendations": "No room recommendations yet. Try your recommendations or listening history.",
+      "heartModeActive": "Heart recommendations active"
+    },
+    "chooseDetail": "Select a message on the left to view details",
+    "openPlayer": "Expand player",
+    "cards": {
+      "song": "Song",
+      "album": "Album",
+      "artist": "Artist",
+      "playlist": "Playlist",
+      "program": "Voice",
+      "mv": "MV",
+      "topic": "Article",
+      "user": "Profile",
+      "radio": "Podcast",
+      "image": "Image",
+      "general": "Message"
+    },
+    "inviteActionHint": "Accept to join their room"
   }
 }

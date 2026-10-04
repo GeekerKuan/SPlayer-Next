@@ -35,6 +35,9 @@ import { setOrpheusProtocolRegistered } from "@main/services/orpheus";
 import { setTaskbarThumbnailEnabled } from "@main/services/thumbnail";
 import { getUpdateState, syncUpdateChannel } from "@main/services/updater";
 import { UPDATE_CHANNELS } from "@shared/types/settings";
+import { socialService } from "@main/services/social";
+import { clearSocialNotifications } from "@main/services/social/notifications";
+import { crossDeviceService } from "@main/services/social/crossDevice";
 
 /**
  * 应用配置写入后的副作用
@@ -43,6 +46,13 @@ import { UPDATE_CHANNELS } from "@shared/types/settings";
  */
 const applyConfigChange = (keyPath: string, value: unknown): void => {
   switch (keyPath) {
+    case "player.crossDeviceResume":
+      if (!value) crossDeviceService.cancel();
+      break;
+    case "system.socialNotifications":
+      socialService.setBackground(value === true);
+      if (!value) clearSocialNotifications();
+      break;
     case "update.channel":
       syncUpdateChannel();
       break;

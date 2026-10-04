@@ -37,3 +37,6 @@ export const logsDir = path.join(dataRoot, "logs");
 
 /** 插件根目录：scripts / data / logs */
 export const pluginsDir = path.join(dataRoot, "plugins");
+
+/** 按账号隔离的加密社交缓存 */
+export const socialCacheDir = path.join(dataRoot, "social-cache");

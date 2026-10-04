@@ -152,6 +152,8 @@ export const useSettingsStore = defineStore(
       showProgressLyric: false,
       snapToLyric: false,
       showLyricInBar: true,
+      togetherAvatarsInBar: true,
+      togetherAvatarsInFullPlayer: true,
       preloadNextTrack: false,
       transitionMode: "none",
       transitionPreference: "standard",
@@ -372,6 +374,9 @@ export const useSettingsStore = defineStore(
           player: PlayerSettings;
         };
         if (player.transitionMode !== "crossfade") player.transitionMode = "none";
+        if (typeof player.togetherAvatarsInBar !== "boolean") player.togetherAvatarsInBar = true;
+        if (typeof player.togetherAvatarsInFullPlayer !== "boolean")
+          player.togetherAvatarsInFullPlayer = true;
         if (
           player.transitionPreference !== "conservative" &&
           player.transitionPreference !== "eager"

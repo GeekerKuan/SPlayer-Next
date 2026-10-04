@@ -7,6 +7,8 @@
  */
 
 import { ipcMain } from "electron";
+import { socialService } from "@main/services/social";
+import { togetherService } from "@main/services/social/together";
 import { callNetease, clearNeteaseCookies, mergeNeteaseCookies } from "@main/apis/netease";
 import { NeteaseRequestError } from "@main/apis/netease/core/request";
 import { cookieToJson } from "@main/apis/netease/core/cookie";
@@ -24,6 +26,10 @@ const dispatch = async (
 ): Promise<Record<string, unknown>> => {
   switch (platform) {
     case "netease": {
+      if (name === "logout") {
+        socialService.logout();
+        togetherService.logout();
+      }
       const res = await callNetease(name, params);
       return { status: res.status, body: res.body };
     }
@@ -63,6 +69,10 @@ export const registerApisIpc = (): void => {
   );
 
   ipcMain.handle("apis:clearSession", (_evt, platform: ApiPlatform) => {
+    if (platform === "netease") {
+      socialService.logout();
+      togetherService.logout();
+    }
     if (platform === "netease") clearNeteaseCookies();
     if (platform === "qqmusic") clearQQMusicCookies();
     if (platform === "kugou") clearKugouSession();

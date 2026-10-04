@@ -1,0 +1,104 @@
+name: Build macOS installers
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: "需要构建的分支、标签或 commit"
+        type: string
+        required: true
+        default: social-together
+      package_installers:
+        description: "生成 DMG/ZIP 安装包（功能验收完成后开启）"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: macos-package-${{ inputs.source_ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: macOS ${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            runner: macos-15-intel
+            app_dir: mac
+          - arch: arm64
+            runner: macos-15
+            app_dir: mac-arm64
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: "false"
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.source_ref }}
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22.x"
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target"
+          key: macos-${{ matrix.arch }}
+      - name: Install dependencies
+        shell: bash
+        run: |
+          rm -f .npmrc
+          pnpm install --frozen-lockfile
+      - name: Verify JavaScript and IPC
+        run: pnpm test
+      # 原生模块在各自架构 runner 编译，不能复用 Windows 的 .node 文件。
+      - name: Build application
+        if: ${{ !inputs.package_installers }}
+        run: pnpm build:unpack --mac --${{ matrix.arch }} --publish never
+      - name: Build installers
+        if: ${{ inputs.package_installers }}
+        run: pnpm build:mac --${{ matrix.arch }} --publish never
+      - name: Verify packaged runtime and native modules
+        shell: bash
+        run: |
+          app="dist/${{ matrix.app_dir }}/SPlayer-Next.app"
+          ELECTRON_RUN_AS_NODE=1 "$app/Contents/MacOS/SPlayer-Next" \
+            scripts/verify-packaged.cjs "$app/Contents/Resources" "${{ matrix.arch }}" darwin
+      - name: Create checksums
+        if: ${{ inputs.package_installers }}
+        shell: bash
+        run: |
+          cd dist
+          shasum -a 256 *.dmg *.zip > SHA256SUMS.txt
+      - uses: actions/upload-artifact@v7
+        if: ${{ inputs.package_installers }}
+        with:
+          name: SPlayer-Next-macos-${{ matrix.arch }}
+          path: |
+            dist/*.dmg
+            dist/*.zip
+            dist/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 14
+      - name: Write build summary
+        shell: bash
+        env:
+          PACKAGE_INSTALLERS: ${{ inputs.package_installers }}
+        run: |
+          {
+            echo "### macOS ${{ matrix.arch }}"
+            echo "Commit: $(git rev-parse HEAD)"
+            echo "Tests, type checks, packaged Electron, native modules and SQLite verified."
+            if [ "$PACKAGE_INSTALLERS" = "true" ]; then
+              echo "DMG/ZIP available in Artifacts for 14 days. Packages are unsigned and not notarized."
+            else
+              echo "Compatibility check only. Run again with package_installers after feature acceptance."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -23,6 +23,9 @@ import { registerAiModelIpc } from "./aiModel";
 import { registerPlaylistIpc } from "./playlist";
 import { registerRecognitionIpc } from "./recognition";
 import { registerOpenccIpc } from "./opencc";
+import { registerSocialIpc } from "./social";
+import { registerTogetherIpc } from "./together";
+import { registerCrossDeviceIpc } from "./crossDevice";
 
 /** 注册所有 IPC 处理 */
 export const registerIpcHandlers = (): void => {
@@ -38,6 +41,9 @@ export const registerIpcHandlers = (): void => {
   registerCommentsIpc();
   registerLyricsIpc();
   registerOpenccIpc();
+  registerSocialIpc();
+  registerTogetherIpc();
+  registerCrossDeviceIpc();
   registerHotkeyIpc();
   registerThemeIpc();
   registerStreamingIpc();

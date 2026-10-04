@@ -1,4 +1,7 @@
 import { ElectronAPI } from "@electron-toolkit/preload";
+import type { SocialApi } from "@shared/types/social";
+import type { TogetherApi } from "@shared/types/together";
+import type { CrossDeviceApi } from "@shared/types/crossDevice";
 import { PlayerApi, TrackSource } from "@shared/types/player";
 import {
   ConfigApi,
@@ -37,6 +40,9 @@ declare global {
   interface Window {
     electron: ElectronAPI;
     api: {
+      social: SocialApi;
+      together: TogetherApi;
+      crossDevice: CrossDeviceApi;
       config: ConfigApi;
       player: PlayerApi;
       system: {

@@ -41,6 +41,8 @@ export type AudioOutputMode = "shared" | "exclusive";
 
 /** 播放器配置 */
 export interface PlayerSettings {
+  /** 原生跨端续播与其他设备最近播放 */
+  crossDeviceResume: boolean;
   /** 加载后自动播放 */
   autoPlay: boolean;
   /** 记忆上次播放的歌曲 */
@@ -473,6 +475,12 @@ export interface SystemConfig {
   system: {
     /** 记忆窗口状态 */
     rememberWindowState: boolean;
+    /** Windows 官方客户端路径；仅连接用户已启用的本机调试端口。 */
+    socialDesktopExecutable: string;
+    /** 默认由 SPlayer 独立维持房间，可手动选择官方客户端兼容方式。 */
+    socialTogetherMode: "native" | "desktop-cdp";
+    /** 在后台检查新消息并显示系统通知。 */
+    socialNotifications: boolean;
     /** 开启无边框主窗口 */
     borderlessWindow: boolean;
     /** 在任务栏显示播放进度 */

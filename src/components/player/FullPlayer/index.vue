@@ -11,6 +11,7 @@ import { usePlaylistPicker } from "@/composables/usePlaylistPicker";
 import { useImmersiveMode } from "@/composables/useImmersiveMode";
 import { useTimeFormat } from "@/composables/useTimeFormat";
 import { useProgressLyric } from "@/composables/useProgressLyric";
+import { useTogetherPresence } from "@/composables/useTogetherPresence";
 import Lyrics from "@/components/player/Lyrics/index.vue";
 import { useWindowControls } from "@/composables/useWindowControls";
 import * as player from "@/core/player";
@@ -22,6 +23,10 @@ import IconLucideDownload from "~icons/lucide/download";
 const status = useStatusStore();
 const media = useMediaStore();
 const settings = useSettingsStore();
+const { active: togetherActive } = useTogetherPresence();
+const showTogether = computed(
+  () => togetherActive.value && settings.player.togetherAvatarsInFullPlayer,
+);
 const fav = useFavorite();
 const { enqueue: enqueueDownload } = useDownload();
 const { t } = useI18n();
@@ -264,7 +269,8 @@ const showComments = (): void => {
               transform: coverCentered ? 'translateX(calc(50vw - 50%))' : undefined,
             }"
           >
-            <div class="relative w-[clamp(200px,85%,50vh)] -translate-y-[11vh]">
+            <div class="relative together-cover-stage" :class="{ 'has-together': showTogether }">
+              <TogetherAudience class="full-audience" :visible="showTogether && isPlayerExpanded" />
               <Transition name="scale-switch" mode="out-in">
                 <div :key="displayTrack?.id">
                   <PlayerCover />
@@ -291,6 +297,9 @@ const showComments = (): void => {
               class="shrink-0 pt-2 pb-6 pl-[calc(1em-0.5rem)]"
               :style="{ fontSize: lyricFontSize }"
             >
+              <div class="fullscreen-audience" :class="{ 'has-together': showTogether }">
+                <TogetherAudience :visible="showTogether && isPlayerExpanded" />
+              </div>
               <PlayerData align="left" simple />
             </div>
             <!-- 歌词容器 -->
@@ -511,6 +520,54 @@ const showComments = (): void => {
 </template>
 
 <style scoped>
+.together-cover-stage {
+  width: clamp(200px, 85%, 50vh);
+  transform: translateY(-11vh);
+  transition:
+    width var(--together-duration) var(--together-easing),
+    transform var(--together-duration) var(--together-easing);
+}
+.together-cover-stage.has-together {
+  width: clamp(180px, 68%, 40vh);
+  transform: translateY(-2vh);
+}
+.full-audience {
+  position: absolute;
+  width: 100%;
+  bottom: calc(100% + 24px);
+  opacity: 0;
+  transform: translateY(24px) scale(0.86);
+  filter: blur(4px);
+  pointer-events: none;
+  transition:
+    opacity var(--together-duration) var(--together-easing),
+    transform var(--together-duration) var(--together-easing),
+    filter var(--together-duration) var(--together-easing);
+}
+.has-together .full-audience {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+  filter: blur(0);
+}
+.fullscreen-audience {
+  height: 0;
+  overflow: hidden;
+  opacity: 0;
+  transition:
+    height var(--together-duration) var(--together-easing),
+    opacity var(--together-duration) var(--together-easing);
+}
+.fullscreen-audience.has-together {
+  height: calc(clamp(48px, 9vh, 80px) + 60px);
+  opacity: 1;
+}
+@media (prefers-reduced-motion: reduce) {
+  .together-cover-stage,
+  .full-audience,
+  .fullscreen-audience {
+    transition: none;
+  }
+}
 .lyric-area {
   filter: drop-shadow(0px 4px 6px rgba(0, 0, 0, 0.2));
   mask: linear-gradient(

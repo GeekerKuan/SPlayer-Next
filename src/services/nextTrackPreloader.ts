@@ -13,6 +13,7 @@ import { useStreamingStore } from "@/stores/streaming";
 import { usePluginsStore } from "@/stores/plugins";
 import { useMediaStore } from "@/stores/media";
 import * as queue from "@/stores/queue";
+import { ownsTogetherPlayback } from "@/services/togetherSession";
 
 /** 预载结果 */
 export interface NextTrackPreloadResult {
@@ -187,6 +188,10 @@ export const finishPreparedTransition = (id: string): void => {
  * 调度下一首预载任务
  */
 export const scheduleNextTrackPreload = (): void => {
+  if (ownsTogetherPlayback()) {
+    invalidateNextTrackPreload();
+    return;
+  }
   if (transitionPreparedId) return;
   const settings = useSettingsStore();
   if (!settings.player.preloadNextTrack) {

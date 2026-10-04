@@ -165,6 +165,7 @@ const handleEscape = (event: KeyboardEvent): void => {
           @mousedown.prevent.stop="handleClear"
         />
       </Transition>
+      <slot name="footer" />
     </template>
 
     <template v-else>

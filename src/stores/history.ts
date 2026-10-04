@@ -1,8 +1,11 @@
 import localforage from "localforage";
 import type { Track } from "@shared/types/player";
+import type { RemotePlayRecord } from "@shared/types/crossDevice";
+import { mergePlayHistory } from "@shared/utils/playHistory";
 
 const db = localforage.createInstance({ name: "splayer", storeName: "history" });
 const HISTORY_KEY = "entries";
+const REMOTE_HIDDEN_KEY = "remote-hidden";
 
 /** 历史条数上限，超出按时间倒序裁掉尾部 */
 const MAX_HISTORY = 500;
@@ -19,13 +22,26 @@ const keyOf = (track: Track): string => `${track.source}:${track.id}`;
 
 export const useHistoryStore = defineStore("history", () => {
   /** 倒序：最近播放在前 */
-  const entries = shallowRef<HistoryEntry[]>([]);
+  const localEntries = shallowRef<HistoryEntry[]>([]);
+  const remoteEntries = shallowRef<RemotePlayRecord[]>([]);
+  const remoteAccount = ref("");
+  const hidden = shallowRef<Record<string, number>>({});
+  let remoteEpoch = 0;
+  let hiddenEpoch = 0;
+  let hiddenLoad: Promise<void> | null = null;
+  const entries = computed(() =>
+    mergePlayHistory(localEntries.value, remoteEntries.value, hidden.value),
+  );
   /** 首次读盘，并发调用复用同一个 */
   let loadPromise: Promise<void> | null = null;
 
   /** 持久化 */
   const persist = (): void => {
-    void db.setItem(HISTORY_KEY, toRaw(entries.value)).catch(() => {});
+    void db.setItem(HISTORY_KEY, toRaw(localEntries.value)).catch(() => {});
+    if (remoteAccount.value)
+      void db
+        .setItem(REMOTE_HIDDEN_KEY, { accountId: remoteAccount.value, hidden: toRaw(hidden.value) })
+        .catch(() => {});
   };
 
   /** 启动时读一次盘，之后内存为真值源 */
@@ -34,7 +50,7 @@ export const useHistoryStore = defineStore("history", () => {
       loadPromise = db
         .getItem<HistoryEntry[]>(HISTORY_KEY)
         .then((cached) => {
-          if (Array.isArray(cached)) entries.value = cached;
+          if (Array.isArray(cached)) localEntries.value = cached;
         })
         .catch(() => {});
     }
@@ -49,8 +65,8 @@ export const useHistoryStore = defineStore("history", () => {
     if (!track?.id) return;
     await load();
     const key = keyOf(track);
-    const filtered = entries.value.filter((item) => keyOf(item.track) !== key);
-    entries.value = [{ track, playedAt: Date.now() }, ...filtered].slice(0, MAX_HISTORY);
+    const filtered = localEntries.value.filter((item) => keyOf(item.track) !== key);
+    localEntries.value = [{ track, playedAt: Date.now() }, ...filtered].slice(0, MAX_HISTORY);
     persist();
   };
 
@@ -60,16 +76,65 @@ export const useHistoryStore = defineStore("history", () => {
    */
   const remove = (track: Track): void => {
     const key = keyOf(track);
-    const next = entries.value.filter((entry) => keyOf(entry.track) !== key);
-    if (next.length === entries.value.length) return;
-    entries.value = next;
+    const next = localEntries.value.filter((entry) => keyOf(entry.track) !== key);
+    const removed = entries.value.find((entry) => keyOf(entry.track) === key);
+    if (removed)
+      hidden.value = Object.fromEntries(
+        Object.entries({ ...hidden.value, [key]: removed.playedAt }).slice(-MAX_HISTORY),
+      );
+    localEntries.value = next;
     persist();
   };
 
   /** 清空全部历史 */
   const clear = (): void => {
-    entries.value = [];
+    hidden.value = Object.fromEntries(
+      entries.value.map((entry) => [keyOf(entry.track), entry.playedAt]),
+    );
+    localEntries.value = [];
     persist();
+  };
+
+  /** 远端记录不落入本机历史库，退出账号或停用后可完整释放。 */
+  const setRemote = async (accountId: string, records: RemotePlayRecord[]): Promise<void> => {
+    const generation = ++remoteEpoch;
+    const changed = accountId !== remoteAccount.value;
+    if (changed) {
+      hidden.value = {};
+      remoteEntries.value = [];
+    }
+    remoteAccount.value = accountId;
+    if (changed) {
+      const loadGeneration = ++hiddenEpoch;
+      hiddenLoad = accountId
+        ? (async () => {
+            try {
+              const cached = await db.getItem<{
+                accountId: string;
+                hidden: Record<string, number>;
+              }>(REMOTE_HIDDEN_KEY);
+              if (remoteAccount.value !== accountId || loadGeneration !== hiddenEpoch) return;
+              if (
+                cached?.accountId === accountId &&
+                cached.hidden &&
+                typeof cached.hidden === "object"
+              ) {
+                const merged = { ...hidden.value };
+                for (const [key, time] of Object.entries(cached.hidden).slice(0, MAX_HISTORY))
+                  if (key.length <= 128 && Number.isFinite(time))
+                    merged[key] = Math.max(merged[key] ?? 0, time);
+                hidden.value = Object.fromEntries(Object.entries(merged).slice(-MAX_HISTORY));
+              }
+            } catch {
+              /* 隐藏记录读盘失败不影响播放历史加载。 */
+            }
+          })()
+        : null;
+    }
+    const job = hiddenLoad;
+    await job;
+    if (generation !== remoteEpoch) return;
+    remoteEntries.value = records;
   };
 
   /** 按时间倒序的扁平曲目列表 */
@@ -82,5 +147,6 @@ export const useHistoryStore = defineStore("history", () => {
     record,
     remove,
     clear,
+    setRemote,
   };
 });

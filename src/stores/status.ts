@@ -164,6 +164,20 @@ export const useStatusStore = defineStore(
   {
     persist: {
       storage: localStorage,
+      serializer: {
+        serialize: (state) => {
+          const backup = queue.getPersistentQueuePlaybackState();
+          return JSON.stringify(
+            Object.fromEntries(
+              Object.entries(state).map(([key, value]) => [
+                key,
+                backup && key in backup ? backup[key as keyof typeof backup] : value,
+              ]),
+            ),
+          );
+        },
+        deserialize: JSON.parse,
+      },
       pick: [
         "playIndex",
         "repeatMode",

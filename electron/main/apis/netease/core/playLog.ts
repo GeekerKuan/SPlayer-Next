@@ -102,6 +102,7 @@ export const buildPld = (
   resource: PlaybackLogResource,
   source: PlaybackLogSource,
   played: number,
+  end: "playend" | "interrupt" = "interrupt",
 ): Record<string, unknown> => ({
   mode: "circulation",
   download: 0,
@@ -131,7 +132,7 @@ export const buildPld = (
   rightSource: 0,
   sourceId: source.id,
   sourcetype: source.type,
-  end: "interrupt",
+  end,
   libra_abt: "",
   channel: ctx.app.channel,
   curStartChannel: "",

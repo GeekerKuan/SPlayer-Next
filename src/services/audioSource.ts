@@ -22,6 +22,8 @@ const PLATFORM_TO_PLUGIN_SOURCE: Record<Platform, string> = {
 export interface ResolveTrackSourceOptions {
   /** 将解析失败原因交给播放流程，供提示和跳曲决策使用 */
   onError?: (error: string) => void;
+  /** 房间只使用网易云官方完整音源，不读取可能来自插件的音频缓存。 */
+  officialOnly?: boolean;
   /** 要跳过的插件 ID 列表 */
   skipPluginIds?: readonly string[];
   /** 是否跳过官方在线接口，直接进入插件兜底 */
@@ -175,7 +177,14 @@ const resolveOnlineUrl = async (
       if (!resolved.available) {
         officialErrorCode = resolved.errorCode;
       } else if (!resolved.isTrial) {
-        return { ok: true, url: resolved.url, isTrial: false, provider: "official" };
+        const url = new URL(resolved.url);
+        if (
+          options.officialOnly &&
+          url.protocol === "http:" &&
+          (url.hostname.endsWith(".music.126.net") || url.hostname.endsWith(".music.163.com"))
+        )
+          url.protocol = "https:";
+        return { ok: true, url: url.toString(), isTrial: false, provider: "official" };
       } else {
         trialUrl = resolved.url;
       }
@@ -208,6 +217,8 @@ const resolveOnlineUrl = async (
       officialErrorCode = ErrorCode.NETWORK_ERROR;
     }
   }
+  if (options.officialOnly)
+    return { ok: false, errorCode: officialErrorCode || ErrorCode.URL_RESOLVE_FAILED };
   const pluginResolved = await resolveByPlugin(track, songLevel, options.skipPluginIds ?? []);
   if (pluginResolved.ok) return pluginResolved;
   if (trialUrl && settings.player.allowTrialPlay) {
@@ -257,6 +268,7 @@ export const resolveTrackSource = async (
   track: Track,
   options: ResolveTrackSourceOptions = {},
 ): Promise<ResolvedTrackSource | null> => {
+  if (options.officialOnly && track.source !== "netease") return null;
   // 本地文件
   if (track.source === "local") {
     const localPath = track.cueAudioPath ?? track.path;
@@ -266,7 +278,10 @@ export const resolveTrackSource = async (
   const settings = useSettingsStore();
   const songLevel = settings.player.songLevel;
   const cacheKey = cacheKeyForTrack(track, songLevel);
-  const cacheEnabled = settings.system.cache?.songCache?.enabled === true && cacheKey !== null;
+  const cacheEnabled =
+    !options.officialOnly &&
+    settings.system.cache?.songCache?.enabled === true &&
+    cacheKey !== null;
   if (cacheEnabled) {
     const cached = await window.api.cache.song.lookup(cacheKey!);
     if (cached) return { source: cached, fromCache: true, provider: "cache" };

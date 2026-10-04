@@ -1,4 +1,11 @@
 import { app, BrowserWindow } from "electron";
+import { socialService } from "@main/services/social";
+import { togetherService } from "@main/services/social/together";
+import {
+  initSocialNotifications,
+  clearSocialNotifications,
+} from "@main/services/social/notifications";
+import { store } from "@main/store";
 import { electronApp, optimizer } from "@electron-toolkit/utils";
 import {
   createMainWindow,
@@ -13,6 +20,7 @@ import { isMac } from "@main/utils/config";
 import { registerIpcHandlers } from "@main/ipc";
 import { init as initMedia, shutdown as shutdownMedia } from "@main/services/media";
 import { init as initLastfm } from "@main/services/lastfm";
+import { shutdown as shutdownNeteasePlaybackSync } from "@main/services/neteaseScrobble";
 import { initGlobalHotkey } from "@main/services/globalHotkey";
 import { initDatabase, closeDatabase } from "@main/database";
 import { init as initSongCache } from "@main/services/songCache";
@@ -46,6 +54,7 @@ const configureMemoryOptimizations = (): void => {
 const MEMORY_LOG_INTERVAL_MS = 10 * 60 * 1000;
 /** 启动后首次采样延迟，避开启动期波动 */
 const MEMORY_LOG_FIRST_DELAY_MS = 60 * 1000;
+let neteasePlaybackSyncFlushed = false;
 
 /** 记录各进程内存工作集，用于量化内存表现与防劣化对比 */
 const logProcessMemory = (): void => {
@@ -115,6 +124,21 @@ export const initApp = (): void => {
     initDatabase();
     // 创建主窗口
     createMainWindow();
+    initSocialNotifications(async (item, accountId) => {
+      const current = await socialService.snapshot();
+      if (current.accountId !== accountId || current.status === "auth-required") return;
+      const page = await socialService.open(item.peerId);
+      const message = page.items.find(
+        (message) =>
+          message.kind === "invite" &&
+          message.invite?.roomId === item.content?.invite?.roomId &&
+          message.invite?.inviterId === item.peerId,
+      );
+      if (!message) return;
+      await togetherService.connect();
+      await togetherService.accept(item.peerId, message.id);
+    });
+    socialService.setBackground(store.get("system.socialNotifications"));
     // 注册 orpheus 协议并处理冷启动唤起
     initOrpheusRegistration();
     const coldOrpheusUrl = extractOrpheusUrl(process.argv);
@@ -162,7 +186,18 @@ export const initApp = (): void => {
     }
   });
   // 退出前清理
-  app.on("before-quit", () => {
+  app.on("before-quit", (event) => {
+    socialService.stopAll();
+    togetherService.stop();
+    clearSocialNotifications();
+    if (!neteasePlaybackSyncFlushed) {
+      event.preventDefault();
+      void shutdownNeteasePlaybackSync().finally(() => {
+        neteasePlaybackSyncFlushed = true;
+        app.quit();
+      });
+      return;
+    }
     coreLog.info("应用即将退出，清理资源");
     shutdownMedia();
     closeDatabase();

@@ -1,0 +1,66 @@
+{
+  "schemaVersion": 1,
+  "syntheticIdentifiers": true,
+  "clientBuild": "3.1.40.205461 / d4d4312",
+  "liveEvidence": {
+    "crossDevice": {
+      "checkedAt": "2026-10-04T03:43:56.026Z",
+      "records": 299,
+      "canResume": false,
+      "codes": {
+        "account": 200,
+        "recentSongs": 200,
+        "relayConfig": 200,
+        "relayPosition": 200,
+        "relaySubmitSource": 200,
+        "relaySubmitState": 200
+      }
+    },
+    "shortLink": {
+      "code": 200,
+      "shortScheme": "https:",
+      "shortHost": "163cn.tv",
+      "redirectStatus": 302,
+      "redirectHost": "st.music.163.com",
+      "redirectPath": "/listen-together/share/",
+      "identifiersMatch": true
+    },
+    "roomRecommendationRead": {
+      "checkedAt": "2026-10-04T08:30:13.269Z",
+      "officialStateSamples": 18,
+      "nativeQueueSamples": 9,
+      "observedListModes": ["heart"],
+      "queueSizes": [10, 13, 19, 22, 25, 28, 31],
+      "recommendationCounts": [0, 3],
+      "mobileSwitchRequestsCaptured": false,
+      "nonMemberFailureCaptured": false
+    }
+  },
+  "parameterExamples": {
+    "recentSongs": {
+      "limit": 300
+    },
+    "relaySubmitSource": {
+      "songListSubmitReq": "{\"retransmit\":false,\"sessionId\":\"fixture00001\",\"initResId\":\"10\",\"playMode\":\"order\",\"resources\":[{\"id\":\"10\",\"type\":\"song\"},{\"id\":\"11\",\"type\":\"song\"}]}"
+    },
+    "relaySubmitState": {
+      "playStateSubmitReq": "{\"resource\":{\"id\":\"10\",\"type\":\"song\"},\"progress\":0,\"sessionId\":\"fixture00001\",\"playMode\":\"order\"}"
+    },
+    "shortLink": {
+      "url": "https://st.music.163.com/listen-together/share/?songId=10&roomId=splayer-validation&inviterId=1"
+    }
+  },
+  "unverified": [
+    "online-presence-authentication-heartbeat-offline",
+    "live-relay-offer-resume",
+    "android-together-summary-message",
+    "private-im-websocket-auth-ack-resume",
+    "joint-heart-recommendation-enable-disable-and-privilege"
+  ],
+  "responseExamples": {
+    "roomPlaylist": {
+      "listMode": "heart",
+      "listModeParam": "{\"fmRcmdUid\":null,\"heartRcmdUid\":1,\"init\":true,\"listMode\":\"heart\"}"
+    }
+  }
+}

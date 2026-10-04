@@ -33,6 +33,9 @@ vi.mock("@main/server", () => ({}));
 vi.mock("@main/services/mcp/http", () => ({}));
 vi.mock("@main/services/orpheus", () => ({}));
 vi.mock("@main/services/thumbnail", () => ({}));
+vi.mock("@main/services/social", () => ({ socialService: { setBackground: vi.fn() } }));
+vi.mock("@main/services/social/notifications", () => ({ clearSocialNotifications: vi.fn() }));
+vi.mock("@main/services/social/crossDevice", () => ({ crossDeviceService: { cancel: vi.fn() } }));
 
 import { registerConfigIpc } from "./config";
 

@@ -5,6 +5,7 @@ import { useMediaStore } from "@/stores/media";
 import { useSettingsStore } from "@/stores/settings";
 import { navigateToArtist } from "@/utils/navigate";
 import { getValidArtists } from "@shared/utils/track";
+import { useTogetherPresence } from "@/composables/useTogetherPresence";
 
 withDefaults(
   defineProps<{
@@ -18,6 +19,15 @@ const status = useStatusStore();
 const media = useMediaStore();
 const settings = useSettingsStore();
 const { isPlayerExpanded, isPlaying } = storeToRefs(status);
+const { active, joined, participants } = useTogetherPresence();
+const showTogether = computed(() => active.value && settings.player.togetherAvatarsInBar);
+/** 宽度和头像位移共享曲线，文字随同一容器移动；中途状态变化直接重定向。 */
+const avatarWidth = computed(() => {
+  const count = Math.min(participants.value.length, 3);
+  return showTogether.value
+    ? `calc(var(--together-avatar-size) * ${1 + (count - 1) * (joined.value ? 0.72 : 1)} + ${joined.value ? 0 : (count - 1) * 6}px)`
+    : "var(--together-avatar-size)";
+});
 
 /** 当前歌曲中可展示的歌手 */
 const artists = computed(() => getValidArtists(media.track?.artists));
@@ -55,21 +65,32 @@ const isArtistLinkable = (artist: Artist): boolean => {
 <template>
   <div class="flex items-center min-w-0" :class="compact ? 'gap-2' : 'gap-3'">
     <!-- 封面 -->
-    <div
-      class="relative shrink-0 rounded-lg overflow-hidden cursor-pointer group"
-      :class="compact ? 'size-10 shadow-sm' : 'size-14'"
+    <button
+      class="together-cover-button relative shrink-0 cursor-pointer group border-none bg-transparent p-0 focus-visible:outline-primary"
+      :class="{ 'has-together': showTogether }"
+      :style="{ '--together-avatar-size': compact ? '40px' : '56px', width: avatarWidth }"
+      :aria-label="$t('social.openPlayer')"
       @click="isPlayerExpanded = true"
     >
-      <SImg :src="media.track?.cover" class="size-full" />
-      <div
-        class="absolute inset-0 z-10 flex items-center justify-center bg-black/0 group-hover:bg-black/40 transition-colors duration-200"
-      >
+      <div class="bar-cover-image absolute inset-y-0 left-0 rounded-lg overflow-hidden">
+        <SImg :src="media.track?.cover" class="size-full" />
+        <div
+          class="absolute inset-0 bg-black/0 group-hover:bg-black/40 transition-colors duration-200"
+        />
+      </div>
+      <TogetherAvatars
+        class="bar-audience"
+        :participants="participants"
+        :joined="joined"
+        :visible="showTogether && !isPlayerExpanded"
+      />
+      <div class="absolute inset-0 z-10 flex items-center justify-center pointer-events-none">
         <IconLucideChevronUp
           class="text-white opacity-0 group-hover:opacity-100 transition-opacity duration-200"
           :class="compact ? 'size-4.5' : 'size-6'"
         />
       </div>
-    </div>
+    </button>
     <!-- 歌曲信息 -->
     <Transition name="slide-left" mode="out-in">
       <div v-if="media.track" :key="media.track.id" class="min-w-0 flex-1">
@@ -128,3 +149,49 @@ const isArtistLinkable = (artist: Artist): boolean => {
     </Transition>
   </div>
 </template>
+
+<style scoped>
+.together-cover-button {
+  height: var(--together-avatar-size);
+  transition: width var(--together-duration) var(--together-easing);
+}
+.bar-cover-image {
+  width: var(--together-avatar-size);
+  transition:
+    opacity var(--together-duration) var(--together-easing),
+    transform var(--together-duration) var(--together-easing),
+    filter var(--together-duration) var(--together-easing);
+}
+.bar-audience {
+  opacity: 0;
+  transform: scale(0.82);
+  filter: blur(4px);
+  transform-origin: left center;
+  pointer-events: none;
+  transition:
+    opacity var(--together-duration) var(--together-easing),
+    transform var(--together-duration) var(--together-easing),
+    filter var(--together-duration) var(--together-easing);
+}
+.has-together .bar-cover-image {
+  opacity: 0;
+  transform: scale(0.82);
+  filter: blur(4px);
+}
+.has-together .bar-audience {
+  opacity: 1;
+  transform: scale(1);
+  filter: blur(0);
+}
+.together-cover-button:hover :deep(.together-avatar::after),
+.together-cover-button:focus-visible :deep(.together-avatar::after) {
+  background: rgb(0 0 0 / 0.4);
+}
+@media (prefers-reduced-motion: reduce) {
+  .together-cover-button,
+  .bar-cover-image,
+  .bar-audience {
+    transition: none;
+  }
+}
+</style>

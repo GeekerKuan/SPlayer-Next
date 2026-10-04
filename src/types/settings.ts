@@ -109,7 +109,7 @@ export const DEFAULT_SIDEBAR_NAV_GROUPS: SidebarNavGroup[] = [
   {
     name: "",
     showName: false,
-    keys: ["/liked", "/favorites", "/cloud", "/download", "/streaming", "/history"],
+    keys: ["/liked", "/favorites", "/cloud", "/download", "/streaming", "/history", "/messages"],
   },
 ];
 
@@ -265,6 +265,9 @@ export interface PlayerSettings {
   snapToLyric: boolean;
   /** 播放时底部显示歌词而非歌手名 */
   showLyricInBar: boolean;
+  /** 两个展示区域独立控制，不影响房间和播放状态。 */
+  togetherAvatarsInBar: boolean;
+  togetherAvatarsInFullPlayer: boolean;
   /** 播放时提前获取下一首的播放数据 */
   preloadNextTrack: boolean;
   /** 相邻曲目的播放过渡方式 */

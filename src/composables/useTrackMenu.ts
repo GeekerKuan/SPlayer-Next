@@ -12,6 +12,8 @@ import { toast } from "@/composables/useToast";
 import { buildDownloadQualityItems } from "@/composables/useDownload";
 import { getTrackShareUrl } from "@/utils/format/shareUrl";
 import { openExternal } from "@/utils/url";
+import { useTogetherStore } from "@/stores/together";
+import IconHeadphones from "~icons/lucide/headphones";
 import IconPlay from "~icons/lucide/play";
 import IconListEnd from "~icons/lucide/list-end";
 import IconListPlus from "~icons/lucide/list-plus";
@@ -62,6 +64,7 @@ export const useTrackMenu = (
   const { t } = useI18n();
   const router = useRouter();
   const status = useStatusStore();
+  const together = useTogetherStore();
   const settings = useSettingsStore();
   const plugins = usePluginsStore();
   const { copy } = useCopyText();
@@ -77,13 +80,22 @@ export const useTrackMenu = (
     const showCloudRemove = isCloudView && track.value?.cloud === true;
     const canAddToPlaylist = source === "local" || source === "netease";
     const isOnline = source !== "local" && source !== "streaming";
+    const inTogether = together.snapshot.mode === "native" && together.snapshot.playbackOwned;
     const base: DropdownMenuItem[] = [
       { key: "play", label: t("songList.context.play"), icon: markRaw(IconPlay), show: showPlay },
       {
         key: "playNext",
         label: t("songList.context.playNext"),
         icon: markRaw(IconListEnd),
-        show: showPlay,
+        show: showPlay && !inTogether,
+      },
+      {
+        key: "addToTogether",
+        label: t("social.together.addToRoom"),
+        icon: markRaw(IconHeadphones),
+        show: !!inTogether && source === "netease" && !track.value?.cloud,
+        disabled:
+          together.busy || together.snapshot.songs.some((song) => song.id === track.value?.id),
       },
       {
         key: "addToPlaylist",
@@ -224,6 +236,21 @@ export const useTrackMenu = (
       return;
     }
     switch (key) {
+      case "addToTogether": {
+        const roomId = together.snapshot.roomId;
+        if (
+          current.source !== "netease" ||
+          current.cloud ||
+          !together.snapshot.playbackOwned ||
+          together.snapshot.mode !== "native"
+        )
+          return;
+        if (await together.add(current.id)) {
+          if (together.snapshot.roomId === roomId) toast.success(t("social.together.addedToRoom"));
+        } else if (together.error)
+          toast.error(t(`social.errors.${together.error}`, together.error));
+        break;
+      }
       case "play":
         player.playNow(current, options.playbackContext?.value);
         break;

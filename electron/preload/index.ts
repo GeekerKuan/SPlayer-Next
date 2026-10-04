@@ -1,4 +1,6 @@
 import os from "os";
+import type { SocialApi, SocialSnapshot, SocialSendInput, NoticeKind } from "@shared/types/social";
+import type { TogetherApi, TogetherSnapshot, TogetherControl } from "@shared/types/together";
 import { contextBridge, ipcRenderer, webUtils } from "electron";
 import { electronAPI } from "@electron-toolkit/preload";
 import type { ExternalApiStatus, McpStatus, TaskbarLyricSettings } from "@shared/types/settings";
@@ -48,6 +50,66 @@ const getInstallType = (): "nsis" | "portable" | "appx" | "dmg" | "appimage" => 
 
 // 暴露给渲染进程的自定义 API
 const api = {
+  together: {
+    chooseClient: () => ipcRenderer.invoke("together:chooseClient"),
+    connect: (chooseClient?: boolean) => ipcRenderer.invoke("together:connect", chooseClient),
+    stop: () => ipcRenderer.invoke("together:stop"),
+    create: (peerId?: string) => ipcRenderer.invoke("together:create", peerId),
+    invite: (peerId: string) => ipcRenderer.invoke("together:invite", peerId),
+    invitationLink: () => ipcRenderer.invoke("together:invitationLink"),
+    replace: (expectedRoomId: string) => ipcRenderer.invoke("together:replace", expectedRoomId),
+    takeOver: (expectedRoomId: string) => ipcRenderer.invoke("together:takeOver", expectedRoomId),
+    closeExternal: (expectedRoomId: string) =>
+      ipcRenderer.invoke("together:closeExternal", expectedRoomId),
+    joinLink: (invite: import("@shared/types/together").TogetherInvitation) =>
+      ipcRenderer.invoke("together:joinLink", invite),
+    readClipboardInvite: () => ipcRenderer.invoke("together:readClipboardInvite"),
+    openInviteLink: (url: string) => ipcRenderer.invoke("together:openInviteLink", url),
+    accept: (peerId: string, messageId: string) =>
+      ipcRenderer.invoke("together:accept", peerId, messageId),
+    leave: () => ipcRenderer.invoke("together:leave"),
+    control: (input: TogetherControl) => ipcRenderer.invoke("together:control", input),
+    recommendations: () => ipcRenderer.invoke("together:recommendations"),
+    add: (songId: string) => ipcRenderer.invoke("together:add", songId),
+    onUpdate: (callback: (snapshot: TogetherSnapshot) => void) => {
+      ipcRenderer.removeAllListeners("together:update");
+      return subscribe("together:update", callback);
+    },
+  } satisfies TogetherApi,
+  crossDevice: {
+    refresh: () => ipcRenderer.invoke("crossDevice:refresh"),
+    resume: () => ipcRenderer.invoke("crossDevice:resume"),
+    publish: (source: import("@shared/types/crossDevice").CrossDeviceSource) =>
+      ipcRenderer.invoke("crossDevice:publish", source),
+    cancel: () => ipcRenderer.invoke("crossDevice:cancel"),
+  } satisfies import("@shared/types/crossDevice").CrossDeviceApi,
+  social: {
+    start: () => ipcRenderer.invoke("social:start"),
+    stop: () => ipcRenderer.invoke("social:stop"),
+    snapshot: () => ipcRenderer.invoke("social:snapshot"),
+    refresh: () => ipcRenderer.invoke("social:refresh"),
+    open: (peerId: string) => ipcRenderer.invoke("social:open", peerId),
+    conversations: (offset: number) => ipcRenderer.invoke("social:conversations", offset),
+    history: (peerId: string, before: number) =>
+      ipcRenderer.invoke("social:history", peerId, before),
+    notifications: (kind: NoticeKind, cursor: number) =>
+      ipcRenderer.invoke("social:notifications", kind, cursor),
+    send: (input: SocialSendInput) => ipcRenderer.invoke("social:send", input),
+    localRead: (peerId: string, time: number) =>
+      ipcRenderer.invoke("social:localRead", peerId, time),
+    localReadNotices: (kind: NoticeKind, time: number) =>
+      ipcRenderer.invoke("social:localReadNotices", kind, time),
+    dismissInvite: (peerId: string, messageId: string) =>
+      ipcRenderer.invoke("social:dismissInvite", peerId, messageId),
+    onUpdate: (callback: (snapshot: SocialSnapshot) => void) => {
+      ipcRenderer.removeAllListeners("social:update");
+      return subscribe("social:update", callback);
+    },
+    onNavigate: (callback: (peerId: string) => void) => {
+      ipcRenderer.removeAllListeners("social:navigate");
+      return subscribe("social:navigate", callback);
+    },
+  } satisfies SocialApi,
   config: {
     get: (keyPath: string) => ipcRenderer.invoke("config:get", keyPath),
     set: (keyPath: string, value: unknown) => ipcRenderer.invoke("config:set", keyPath, value),

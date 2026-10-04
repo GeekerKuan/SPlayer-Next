@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const storage = vi.hoisted(() => ({
   getItem: vi.fn(),
-  setItem: vi.fn(() => Promise.resolve()),
+  setItem: vi.fn((_key: string, _value: PlaybackQueueItem[] | null) => Promise.resolve()),
 }));
 
 vi.mock("localforage", () => ({
@@ -28,6 +28,13 @@ import {
   unshuffleQueue,
   updateQueueItem,
   updateQueueTracks,
+  setTemporaryQueue,
+  restoreTemporaryQueue,
+  getTemporaryPlaybackState,
+  getPersistentQueuePlaybackState,
+  prepareTemporaryPlayback,
+  discardPreparedPlayback,
+  removeServerTracks,
 } from "./queue";
 
 const track = (id: string): Track => ({
@@ -49,13 +56,86 @@ const entry = (id: string, playbackContext?: PlaybackContext): PlaybackQueueItem
   track: track(id),
   context: playbackContext,
 });
+const playback = {
+  playIndex: 1,
+  position: 32000,
+  duration: 60000,
+  repeatMode: "one" as const,
+  shuffleMode: "on" as const,
+  heartMode: true,
+  fmMode: false,
+};
 
 describe("queue", () => {
   beforeEach(() => {
+    restoreTemporaryQueue();
     queueEntries.value = [];
     originalQueue.value = null;
     storage.getItem.mockReset();
     storage.setItem.mockClear();
+  });
+
+  it("房间队列不落盘，跨房更新后恢复同一份普通队列、上下文和随机备份", () => {
+    setQueue([track("a"), track("b")], context);
+    originalQueue.value = [entry("b", context), entry("a", context)];
+    storage.setItem.mockClear();
+    setTemporaryQueue([track("room-a")], context, playback);
+    setTemporaryQueue([track("room-b")], context, { ...playback, playIndex: 0, position: 0 });
+    insertToQueue(track("temporary"), 0);
+    expect(storage.setItem).not.toHaveBeenCalled();
+    expect(getPersistentQueuePlaybackState()).toEqual(playback);
+    expect(restoreTemporaryQueue()).toEqual(playback);
+    expect(queue.value.map((item) => item.id)).toEqual(["a", "b"]);
+    expect(queueEntries.value[1].context).toEqual(context);
+    expect(originalQueue.value?.map((item) => item.track.id)).toEqual(["b", "a"]);
+    expect(getTemporaryPlaybackState()).toBeNull();
+    expect(restoreTemporaryQueue()).toBeNull();
+  });
+
+  it("入房失败清理预备记忆，成功则沿用音频停止前的位置", () => {
+    setQueue([track("a"), track("b")]);
+    prepareTemporaryPlayback(playback);
+    expect(getPersistentQueuePlaybackState()?.position).toBe(32000);
+    expect(getTemporaryPlaybackState()).toBeNull();
+    discardPreparedPlayback();
+    expect(getPersistentQueuePlaybackState()).toBeNull();
+    prepareTemporaryPlayback(playback);
+    setTemporaryQueue([], context, { ...playback, position: 0 });
+    expect(restoreTemporaryQueue()?.position).toBe(32000);
+  });
+
+  it("房间歌曲的元数据不会污染同 ID 的本地或流媒体歌曲", () => {
+    setQueue([track("10"), { ...track("10"), source: "streaming", serverId: "server" }]);
+    setTemporaryQueue([{ ...track("10"), source: "netease" }], context, playback);
+    updateQueueTracks([{ ...track("10"), source: "netease", title: "room metadata" }]);
+    expect(queue.value[0].title).toBe("room metadata");
+    restoreTemporaryQueue();
+    expect(queue.value.map((item) => item.source)).toEqual(["local", "streaming"]);
+    expect(queue.value.every((item) => item.title === "10")).toBe(true);
+  });
+
+  it("迟到的磁盘恢复只更新普通队列，不替换正在显示的房间列表", async () => {
+    setTemporaryQueue([track("room")], context, playback);
+    storage.getItem.mockResolvedValueOnce([track("a")]).mockResolvedValueOnce(null);
+    await restoreQueue();
+    expect(queue.value[0].id).toBe("room");
+    restoreTemporaryQueue();
+    expect(queue.value[0].id).toBe("a");
+  });
+
+  it("一起听期间标签修改和服务器删除仍更新普通队列，房间曲目不会持久化", () => {
+    setQueue([{ ...track("a"), source: "streaming", serverId: "deleted" }, track("b")]);
+    setTemporaryQueue([track("room")], context, playback);
+    storage.setItem.mockClear();
+    updateQueueTracks([{ ...track("b"), title: "changed" }]);
+    removeServerTracks("deleted");
+    const savedLists = storage.setItem.mock.calls.filter((call) => call[0] === "playList");
+    expect(savedLists.every((call) => !call[1]?.some((item) => item.track.id === "room"))).toBe(
+      true,
+    );
+    expect(restoreTemporaryQueue()?.playIndex).toBe(0);
+    expect(queue.value.map((item) => item.id)).toEqual(["b"]);
+    expect(queue.value[0].title).toBe("changed");
   });
 
   it("替换队列时复制输入并清除洗牌备份", () => {

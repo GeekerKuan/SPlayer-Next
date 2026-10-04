@@ -52,6 +52,12 @@ import type {
 import type { MediaEvent } from "@main/services/media";
 import { JsPlayerEvent } from "@splayer/audio-engine";
 import type { JsMusicMetadata } from "@splayer/audio-engine";
+import {
+  isTogetherPlaybackLocked,
+  canLoadTogetherTrack,
+  canPlayTogetherTrack,
+  routeTogetherControl,
+} from "@main/services/social/playbackOwnership";
 
 type AudioEngineModule = typeof import("@splayer/audio-engine");
 
@@ -361,8 +367,21 @@ const completeTrackLoad = (
 export const registerPlayerIpc = (): void => {
   ipcMain.handle(
     "player:prepareNext",
-    (_event, id: string, source: string, startMs?: number, preference?: TransitionPreference) =>
-      prepareNextTrack(id, source, startMs, preference),
+    async (
+      _event,
+      id: string,
+      source: string,
+      startMs?: number,
+      preference?: TransitionPreference,
+    ) => {
+      if (!canLoadTogetherTrack(undefined, source)) return false;
+      const prepared = await prepareNextTrack(id, source, startMs, preference);
+      if (!canLoadTogetherTrack(undefined, source)) {
+        cancelPreparedTrack(id);
+        return false;
+      }
+      return prepared;
+    },
   );
   ipcMain.handle("player:cancelPrepared", (_event, id: string) => cancelPreparedTrack(id));
   ipcMain.handle(
@@ -375,6 +394,10 @@ export const registerPlayerIpc = (): void => {
       preference: TransitionPreference,
       options: LoadOptions = {},
     ) => {
+      if (!canLoadTogetherTrack(options.meta, source)) {
+        cancelPreparedTrack(id);
+        return fail(ErrorCode.TOGETHER_PLAYBACK_LOCKED);
+      }
       const seq = loadSeq;
       const current = getPlayer();
       try {
@@ -401,6 +424,11 @@ export const registerPlayerIpc = (): void => {
           endMs / 1000,
         );
         if (seq !== loadSeq || current !== getPlayer()) return { success: false };
+        if (!canLoadTogetherTrack(options.meta, source)) {
+          current.stop();
+          cancelPreparedTrack(id);
+          return fail(ErrorCode.TOGETHER_PLAYBACK_LOCKED);
+        }
         if (!meta) {
           playerLog.info("交叉过渡未启动，等待正常切歌");
           return { success: false };
@@ -454,6 +482,8 @@ export const registerPlayerIpc = (): void => {
   });
   // 加载音频文件
   ipcMain.handle("player:load", async (_event, source: string, options: LoadOptions = {}) => {
+    if (!canLoadTogetherTrack(options.meta, source))
+      return fail(ErrorCode.TOGETHER_PLAYBACK_LOCKED);
     cancelPendingReinit();
     const autoPlay = options.autoPlay ?? true;
     const authoritative = options.meta ?? null;
@@ -529,6 +559,10 @@ export const registerPlayerIpc = (): void => {
           if (options.preparedId) cancelPreparedTrack(options.preparedId);
         });
       if (seq !== loadSeq || inst !== getPlayer()) return fail(ErrorCode.LOAD_SUPERSEDED);
+      if (!canLoadTogetherTrack(options.meta, source)) {
+        inst.stop();
+        return fail(ErrorCode.TOGETHER_PLAYBACK_LOCKED);
+      }
       if (cueRange) {
         if (meta.preparedPosition !== cueRange.startMs / 1000)
           await inst.seek(cueRange.startMs / 1000);
@@ -558,6 +592,8 @@ export const registerPlayerIpc = (): void => {
 
   // 恢复播放
   ipcMain.handle("player:play", async () => {
+    if (!canPlayTogetherTrack(nowPlaying.lightSnapshot().track))
+      return fail(ErrorCode.TOGETHER_PLAYBACK_LOCKED);
     try {
       await getPlayer().play();
       return { success: true };
@@ -726,6 +762,9 @@ export const registerPlayerIpc = (): void => {
 
   // 设置播放速度（0.5 ~ 2.0），引擎侧自动 clamp
   ipcMain.handle("player:setSpeed", (_event, speed: number) => {
+    if (!canPlayTogetherTrack(null) && speed !== 1) {
+      return fail(ErrorCode.TOGETHER_PLAYBACK_LOCKED);
+    }
     try {
       getPlayer().setSpeed(speed);
       mediaService.setRate(speed);
@@ -876,10 +915,29 @@ export const registerPlayerIpc = (): void => {
   // 系统媒体事件处理
   mediaService.onEvent((event: MediaEvent) => {
     try {
+      // 系统媒体控件也必须先同步房间，不能只改变本机引擎状态。
+      const roomAction =
+        event.type === "Play"
+          ? { action: "resume" as const }
+          : event.type === "Pause" || event.type === "Stop"
+            ? { action: "pause" as const }
+            : event.type === "Seek" && event.positionMs != null
+              ? { action: "seek" as const, positionMs: event.positionMs }
+              : event.type === "NextTrack"
+                ? { action: "next" as const }
+                : event.type === "PrevTrack"
+                  ? { action: "previous" as const }
+                  : null;
+      const room = roomAction && routeTogetherControl(roomAction);
+      if (room) {
+        void room.catch((error) => playerLog.warn("系统媒体房间控制失败", error));
+        return;
+      }
+      if (event.type === "SetRate" && !canPlayTogetherTrack(null)) return;
       const inst = getPlayer();
       switch (event.type) {
         case "Play":
-          void inst.play().catch(() => {});
+          if (!isTogetherPlaybackLocked()) void inst.play().catch(() => {});
           break;
         case "Pause":
           inst.pause();

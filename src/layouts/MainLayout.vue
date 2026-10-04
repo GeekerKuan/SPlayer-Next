@@ -169,6 +169,7 @@ const playerBarInnerClass = computed(() => {
   <FullPlayer />
   <!-- 全局设置 -->
   <SettingsDialog />
+  <TogetherDialog />
   <!-- 更新弹窗 -->
   <UpdateDialog />
   <!-- 评论弹窗 -->

@@ -122,8 +122,12 @@ export const useMediaStore = defineStore("media", () => {
     };
   };
 
+  /** 简繁转换竞态 token */
+  let transformToken = 0;
+
   /** 重置歌词状态 */
   const resetLyricState = (): void => {
+    transformToken++;
     activeLyric.value = null;
     lyricContent.value = null;
     parsedLyric.value = [];
@@ -132,9 +136,6 @@ export const useMediaStore = defineStore("media", () => {
     lyricLoading.value = true;
     syncToMain();
   };
-
-  /** 简繁转换竞态 token */
-  let transformToken = 0;
 
   // 监听简繁转换设置变化并重新解析当前歌词
   watch(
@@ -152,6 +153,7 @@ export const useMediaStore = defineStore("media", () => {
    * @param input - 主歌词 + 可选翻译 / 音译；传 null 即清空
    */
   const setLyric = (source: LyricData, input: LyricInput | null): void => {
+    const token = ++transformToken;
     let nextLines: LyricLine[] = [];
     let authors: string[] = [];
     const settings = useSettingsStore();
@@ -197,7 +199,6 @@ export const useMediaStore = defineStore("media", () => {
     // 应用 OpenCC 简繁转换
     const cjkMode = settings.lyric.cjkTransform;
     if (hasContent && cjkMode && cjkMode !== "none") {
-      const token = ++transformToken;
       applyLyricCjkTransform(nextLines, cjkMode).then((transformed) => {
         if (token !== transformToken) return;
         parsedLyric.value = transformed;
@@ -216,6 +217,7 @@ export const useMediaStore = defineStore("media", () => {
 
   /** 清空所有状态 */
   const clear = (): void => {
+    transformToken++;
     track.value = null;
     playbackContext.value = undefined;
     detail.value = null;

@@ -106,6 +106,10 @@ const config: Configuration = {
       from: "LICENSE",
       to: "LICENSE",
     },
+    {
+      from: "THIRD_PARTY_NOTICES.md",
+      to: "THIRD_PARTY_NOTICES.md",
+    },
   ],
   win: {
     executableName: "SPlayer-Next",

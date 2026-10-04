@@ -21,6 +21,8 @@
 
 ## Features
 
+This working branch adds native Messages, independent Listen Together, official invite links, and cross-device history/resume. See the [module guide](docs/social/README.md) and [current validation status](docs/social/iteration-2026-10-04.md). Independent room synchronization has been tested with two accounts; online presence reporting and remote read receipts still lack protocol evidence. The final installer has not been rebuilt. The derivative retains AGPL-3.0.
+
 - 🎵 **Broad format support** — MP3, FLAC, WAV, AAC, OGG, APE, and more, decoded via FFmpeg
 - 📝 **Rich lyrics** — LRC / QRC / YRC / TTML, word-by-word highlighting and translations, with desktop, dynamic-island, and taskbar lyric windows
 - 🌐 **Streaming servers** — Subsonic / Navidrome / Jellyfin / Emby (multi-server, auto-connect)

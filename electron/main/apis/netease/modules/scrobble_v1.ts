@@ -26,7 +26,8 @@ const scrobbleV1: NeteaseModule = async (query) => {
     return { status: 400, body: { code: 400, msg: "缺少有效的资源 ID" }, cookie: [] };
   }
   const playTime = Number(query.time);
-  if (Number.isNaN(playTime) || playTime <= 0) {
+  const phase = query.phase === "start" || query.phase === "end" ? query.phase : "complete";
+  if (Number.isNaN(playTime) || (phase !== "start" && playTime <= 0)) {
     return { status: 400, body: { code: 400, msg: "缺少有效的 time (播放时长)" }, cookie: [] };
   }
 
@@ -65,16 +66,17 @@ const scrobbleV1: NeteaseModule = async (query) => {
   const cookieStr = buildCookieStr(ctx);
   const ts = Math.floor(Date.now() / 1000);
   const played = Math.min(playTime, totalTime);
+  const end = query.end === "playend" ? "playend" : "interrupt";
   const plvBody = buildRecords([
     { time: ts, action: "_plv", data: buildPlv(ctx, resource, source) },
   ]);
   const pldBody = buildRecords([
-    { time: ts, action: "_pld", data: buildPld(ctx, resource, source, played) },
+    { time: ts, action: "_pld", data: buildPld(ctx, resource, source, played, end) },
   ]);
 
   try {
-    const plv = await doUpload(ctx, metaJson, plvBody, cookieStr);
-    if (!plv.success) {
+    const plv = phase === "end" ? null : await doUpload(ctx, metaJson, plvBody, cookieStr);
+    if (plv && !plv.success) {
       const rate = plv.respBody?.data?.rate;
       return {
         status: 502,
@@ -87,14 +89,14 @@ const scrobbleV1: NeteaseModule = async (query) => {
       };
     }
 
-    const pld = await doUpload(ctx, metaJson, pldBody, cookieStr);
-    if (!pld.success) {
+    const pld = phase === "start" ? null : await doUpload(ctx, metaJson, pldBody, cookieStr);
+    if (pld && !pld.success) {
       return {
         status: 502,
         body: {
           code: 502,
           msg: "PLV 成功但 PLD 失败",
-          details: { plv: plv.respBody, pld: pld.respBody },
+          details: { plv: plv?.respBody, pld: pld.respBody },
         },
         cookie: [],
       };
@@ -104,10 +106,10 @@ const scrobbleV1: NeteaseModule = async (query) => {
       status: 200,
       body: {
         code: 200,
-        data: "scrobble_v1 上报成功",
+        data: `scrobble_v1 ${phase} 上报成功`,
         details: {
-          plv: { fileName: plv.fileName, payloadSize: plv.payload.length },
-          pld: { fileName: pld.fileName, payloadSize: pld.payload.length },
+          ...(plv ? { plv: { fileName: plv.fileName, payloadSize: plv.payload.length } } : {}),
+          ...(pld ? { pld: { fileName: pld.fileName, payloadSize: pld.payload.length } } : {}),
         },
       },
       cookie: [],

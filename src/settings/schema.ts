@@ -5,6 +5,7 @@ import playerCategory from "./categories/player";
 import lyricCategory from "./categories/lyric";
 import externalLyricCategory from "./categories/externalLyric";
 import hotkeysCategory from "./categories/hotkeys";
+import messagesCategory from "./categories/messages";
 import servicesCategory from "./categories/services";
 import aiIntegrationCategory from "./categories/aiIntegration";
 import mediaSourceCategory from "./categories/streaming";
@@ -23,6 +24,7 @@ export const settingsSchema: SettingCategory[] = [
   lyricCategory,
   externalLyricCategory,
   hotkeysCategory,
+  messagesCategory,
   servicesCategory,
   aiIntegrationCategory,
   mediaSourceCategory,
