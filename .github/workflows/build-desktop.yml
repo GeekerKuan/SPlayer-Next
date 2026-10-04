@@ -1,0 +1,142 @@
+name: Build social desktop installers
+
+on:
+  push:
+    branches: [social-together]
+    paths: [".github/workflows/build-desktop.yml"]
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: "需要构建的分支、标签或 commit"
+        type: string
+        required: true
+        default: social-together
+
+permissions:
+  contents: read
+
+concurrency:
+  group: social-installers-${{ inputs.source_ref || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows x64
+            runner: windows-latest
+            arch: x64
+            platform: win32
+            target: win
+            app_dir: win-unpacked
+          - name: macOS Intel
+            runner: macos-15-intel
+            arch: x64
+            platform: darwin
+            target: mac
+            app_dir: mac
+          - name: macOS Apple Silicon
+            runner: macos-15
+            arch: arm64
+            platform: darwin
+            target: mac
+            app_dir: mac-arm64
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: "false"
+      ELECTRON_MIRROR: https://github.com/electron/electron/releases/download/
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.source_ref || github.sha }}
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22.x"
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target"
+          key: social-${{ matrix.platform }}-${{ matrix.arch }}
+      - name: Install dependencies
+        shell: bash
+        run: |
+          rm -f .npmrc
+          pnpm install --frozen-lockfile
+      - name: Verify JavaScript and IPC
+        run: pnpm test
+      # 各自原生 runner 编译 Rust、SQLite 和安装器，保留原应用身份和数据路径。
+      - name: Build installers
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: pnpm build:${{ matrix.target }} --${{ matrix.arch }} --publish never
+      - name: Verify packaged runtime and native modules
+        shell: bash
+        run: |
+          if [ "${{ matrix.platform }}" = "win32" ]; then
+            executable="dist/${{ matrix.app_dir }}/SPlayer-Next.exe"
+            resources="dist/${{ matrix.app_dir }}/resources"
+          else
+            app="dist/${{ matrix.app_dir }}/SPlayer-Next.app"
+            executable="$app/Contents/MacOS/SPlayer-Next"
+            resources="$app/Contents/Resources"
+          fi
+          ELECTRON_RUN_AS_NODE=1 "$executable" scripts/verify-packaged.cjs \
+            "$resources" "${{ matrix.arch }}" "${{ matrix.platform }}"
+      - name: Create checksums and build metadata
+        shell: bash
+        env:
+          BUILD_PLATFORM: ${{ matrix.platform }}
+          BUILD_ARCH: ${{ matrix.arch }}
+        run: |
+          node --input-type=module <<'NODE'
+          import { createHash } from "node:crypto";
+          import { createReadStream } from "node:fs";
+          import { readFile, readdir, writeFile } from "node:fs/promises";
+          import { execFileSync } from "node:child_process";
+          const files = (await readdir("dist")).filter(name => /\.(exe|dmg|zip)$/.test(name)).sort();
+          if (!files.length) throw new Error("没有生成安装包");
+          const lines = [];
+          for (const name of files) {
+            const hash = createHash("sha256");
+            for await (const chunk of createReadStream(`dist/${name}`)) hash.update(chunk);
+            lines.push(`${hash.digest("hex")}  ${name}`);
+          }
+          const pkg = JSON.parse(await readFile("package.json", "utf8"));
+          await writeFile("dist/SHA256SUMS.txt", lines.join("\n") + "\n");
+          await writeFile("dist/BUILDINFO.json", JSON.stringify({
+            commit: execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim(),
+            version: pkg.version, productName: pkg.productName, license: pkg.license,
+            platform: process.env.BUILD_PLATFORM, arch: process.env.BUILD_ARCH,
+            files, signed: false, notarized: false,
+          }, null, 2) + "\n");
+          NODE
+      - uses: actions/upload-artifact@v7
+        with:
+          name: SPlayer-Next-${{ matrix.platform }}-${{ matrix.arch }}
+          path: |
+            dist/*.exe
+            dist/*.dmg
+            dist/*.zip
+            dist/SHA256SUMS.txt
+            dist/BUILDINFO.json
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
+      - name: Write build summary
+        shell: bash
+        run: |
+          {
+            echo "### ${{ matrix.name }}"
+            echo "Commit: $(git rev-parse HEAD)"
+            echo "Installers, SHA256SUMS.txt and BUILDINFO.json are in Artifacts for 14 days."
+            echo "Packaged Electron, native modules and SQLite checked. Packages are unsigned; macOS is not notarized."
+            echo "Existing user data compatibility and live two-account acceptance still require user verification."
+          } >> "$GITHUB_STEP_SUMMARY"
+
