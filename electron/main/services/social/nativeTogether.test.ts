@@ -1,4 +1,4 @@
-import { test } from "node:test";
+import { test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import { NativeTogetherService } from "./nativeTogetherService";
 import { emptySocialSnapshot } from "./service";
@@ -63,7 +63,10 @@ const fixture = (resume?: { accountId: string; roomId: string; joinedAt: number 
   let heartbeatHook: (() => Promise<void> | void) | undefined;
   let createHook: (() => Promise<void> | void) | undefined;
   let haltHook: (() => void) | undefined;
-  const playback = { songId: "10", playing: false, progressMs: 1000, ready: true };
+  const playback = { songId: "10", playing: false, progressMs: 1000, ready: true, finished: false };
+  let autoRecommend = true;
+  let writeHook: ((operation: NativeOperation) => Promise<void> | void) | undefined;
+  let recommendationHook: (() => Promise<void> | void) | undefined;
   let halts = 0;
   const savedRooms: ({ accountId: string; roomId: string; joinedAt: number } | null)[] = [];
   let leaveOutcome: "success" | "unchanged" | "unknown" = "success";
@@ -78,6 +81,7 @@ const fixture = (resume?: { accountId: string; roomId: string; joinedAt: number 
     account: async () => social,
     update: () => {},
     ownership: () => {},
+    autoRecommend: () => autoRecommend,
     halt: () => {
       halts++;
       haltHook?.();
@@ -108,6 +112,7 @@ const fixture = (resume?: { accountId: string; roomId: string; joinedAt: number 
             await createHook?.();
             return { data: { roomInfo: info } };
           case "recommendations":
+            await recommendationHook?.();
             return {
               data: { dailySongs: [{ id: 13, name: "recommended", dt: 60000, ar: [] }] },
             };
@@ -126,11 +131,13 @@ const fixture = (resume?: { accountId: string; roomId: string; joinedAt: number 
             await heartbeatHook?.();
             return { data: { result: heartbeat } };
           case "roomCommand": {
+            await writeHook?.(operation);
             const sent = JSON.parse(String(data.commandInfo));
             Object.assign(command, sent, { serverSeq: ++serverSeq });
             return { data: { result: true } };
           }
           case "roomAdd":
+            await writeHook?.(operation);
             playlist.displayList.result.push(...JSON.parse(String(data.playlistParam)).displayList);
             return { data: { result: true } };
           case "roomLeave":
@@ -163,6 +170,15 @@ const fixture = (resume?: { accountId: string; roomId: string; joinedAt: number 
     onHalt: (hook: () => void) => {
       haltHook = hook;
     },
+    onWrite: (hook: (operation: NativeOperation) => Promise<void> | void) => {
+      writeHook = hook;
+    },
+    onRecommendations: (hook: () => Promise<void> | void) => {
+      recommendationHook = hook;
+    },
+    setAutoRecommend: (value: boolean) => {
+      autoRecommend = value;
+    },
     failShort: () => {
       shortFailure = true;
     },
@@ -183,6 +199,366 @@ const fixture = (resume?: { accountId: string; roomId: string; joinedAt: number 
     },
   };
 };
+
+/** 排空被测试轮询的微任务，不等待真实网络或创建额外生产定时器。 */
+const tickRoom = async (t: TestContext, ms: number): Promise<void> => {
+  t.mock.timers.tick(ms);
+  await new Promise<void>((resolve) => setImmediate(resolve));
+};
+const finishRoomSong = (f: ReturnType<typeof fixture>): void => {
+  Object.assign(f.playback, { songId: f.command.targetSongId, ready: false, finished: true });
+  const state = f.service.snapshot();
+  f.service.notifyEnded({
+    roomId: state.roomId,
+    songId: state.songId,
+    commandSeq: state.commandSeq!,
+  });
+};
+
+test("host advances an existing queue once and rejects duplicate or stale end events", async (t) => {
+  t.mock.timers.enable({ apis: ["Date", "setTimeout"], now: Date.now() });
+  const f = fixture();
+  try {
+    f.setRoom();
+    f.info.creatorId = "1";
+    f.command.playStatus = "PLAY";
+    await f.service.takeOver("room-a");
+    finishRoomSong(f);
+    assert.equal(f.service.snapshot().awaitingNext, true);
+    finishRoomSong(f);
+    await tickRoom(t, 0);
+    assert.equal(f.service.snapshot().songId, "11");
+    assert.equal(f.service.snapshot().awaitingNext, false);
+    assert.equal(f.calls.filter((call) => call.operation === "roomCommand").length, 1);
+    assert.equal(f.calls.filter((call) => call.operation === "roomAdd").length, 0);
+  } finally {
+    f.service.stop();
+  }
+});
+
+test("host appends one official recommendation at the tail and advances without replacing its queue", async (t) => {
+  t.mock.timers.enable({ apis: ["Date", "setTimeout"], now: Date.now() });
+  const f = fixture();
+  try {
+    f.setRoom();
+    f.info.creatorId = "1";
+    f.command.playStatus = "PLAY";
+    f.command.targetSongId = "11";
+    await f.service.takeOver("room-a");
+    finishRoomSong(f);
+    await tickRoom(t, 0);
+    assert.deepEqual(
+      f.service.snapshot().songs.map((song) => song.id),
+      ["10", "11", "12"],
+    );
+    assert.equal(f.service.snapshot().songId, "12");
+    assert.equal(f.calls.filter((call) => call.operation === "roomAdd").length, 1);
+    const next = JSON.parse(
+      String(f.calls.find((call) => call.operation === "roomCommand")!.data.commandInfo),
+    );
+    assert.equal(next.commandType, "NEXT");
+    assert.equal(next.targetSongId, "12");
+    assert.equal(next.progress, 0);
+  } finally {
+    f.service.stop();
+  }
+});
+
+test("exhausted room recommendations fall back to the acting account's daily recommendation", async (t) => {
+  t.mock.timers.enable({ apis: ["Date", "setTimeout"], now: Date.now() });
+  const f = fixture();
+  try {
+    f.setRoom();
+    f.info.creatorId = "1";
+    f.command.playStatus = "PLAY";
+    f.command.targetSongId = "11";
+    f.playlist.displayList.rcmdSongIds = ["10", "11"];
+    await f.service.takeOver("room-a");
+    finishRoomSong(f);
+    await tickRoom(t, 0);
+    assert.equal(f.service.snapshot().songId, "13");
+    assert.equal(f.calls.filter((call) => call.operation === "recommendations").length, 1);
+  } finally {
+    f.service.stop();
+  }
+});
+
+test("a member waits for the host, then continues the unchanged room without changing its creator", async (t) => {
+  t.mock.timers.enable({ apis: ["Date", "setTimeout"], now: Date.now() });
+  const f = fixture();
+  try {
+    f.setRoom();
+    f.command.playStatus = "PLAY";
+    await f.service.takeOver("room-a");
+    finishRoomSong(f);
+    await tickRoom(t, 0);
+    assert.equal(f.calls.filter((call) => call.operation === "roomCommand").length, 0);
+    await tickRoom(t, 4000);
+    assert.equal(f.service.snapshot().songId, "11");
+    assert.equal(f.service.snapshot().status, "together");
+    assert.equal(f.info.creatorId, "2");
+    assert.equal(f.calls.filter((call) => call.operation === "roomCommand").length, 1);
+    assert.ok(!f.calls.some((call) => ["roomCreate", "roomLeave"].includes(call.operation)));
+  } finally {
+    f.service.stop();
+  }
+});
+
+test("a remote next command during the member grace period cancels local continuation", async (t) => {
+  t.mock.timers.enable({ apis: ["Date", "setTimeout"], now: Date.now() });
+  const f = fixture();
+  try {
+    f.setRoom();
+    f.command.playStatus = "PLAY";
+    await f.service.takeOver("room-a");
+    finishRoomSong(f);
+    await tickRoom(t, 0);
+    Object.assign(f.command, { targetSongId: "11", serverSeq: 2, progress: 0 });
+    await tickRoom(t, 4000);
+    assert.equal(f.service.snapshot().songId, "11");
+    assert.equal(f.service.snapshot().awaitingNext, false);
+    assert.ok(!f.calls.some((call) => call.operation === "roomCommand"));
+  } finally {
+    f.service.stop();
+  }
+});
+
+test("multiple members elect one continuation sender rather than all sending NEXT", async (t) => {
+  t.mock.timers.enable({ apis: ["Date", "setTimeout"], now: Date.now() });
+  const f = fixture();
+  try {
+    f.setRoom();
+    f.command.playStatus = "PLAY";
+    f.social.accountId = "5";
+    f.info.roomUsers[0].userId = "5";
+    f.info.roomUsers.push({
+      userId: "3",
+      nickname: "other",
+      avatarUrl: "https://p1.music.126.net/other.jpg",
+    });
+    await f.service.takeOver("room-a");
+    finishRoomSong(f);
+    await tickRoom(t, 0);
+    await tickRoom(t, 6000);
+    assert.equal(f.service.snapshot().awaitingNext, true);
+    assert.ok(!f.calls.some((call) => call.operation === "roomCommand"));
+  } finally {
+    f.service.stop();
+  }
+});
+
+test("single loop, heart, unknown modes and disabled auto-recommend preserve their queue policy", async (t) => {
+  for (const mode of ["single", "heart", "future", "disabled"]) {
+    await t.test(mode, async (sub) => {
+      sub.mock.timers.enable({ apis: ["Date", "setTimeout"], now: Date.now() });
+      const f = fixture();
+      try {
+        f.setRoom();
+        f.info.creatorId = "1";
+        f.command.playStatus = "PLAY";
+        f.command.targetSongId = "11";
+        if (mode === "single") f.playlist.playMode = "SINGLE_LOOP";
+        if (mode === "heart") f.playlist.listMode = "heart";
+        if (mode === "future") f.playlist.listMode = "future-mode";
+        if (mode === "disabled") f.setAutoRecommend(false);
+        await f.service.takeOver("room-a");
+        finishRoomSong(f);
+        await tickRoom(sub, 0);
+        assert.ok(
+          !f.calls.some(
+            (call) => call.operation === "roomAdd" || call.operation === "recommendations",
+          ),
+        );
+        assert.equal(f.service.snapshot().songId, mode === "single" ? "11" : "10");
+      } finally {
+        f.service.stop();
+      }
+    });
+  }
+});
+
+test("unknown ADD is not replayed; a later queue confirmation permits exactly one NEXT", async (t) => {
+  t.mock.timers.enable({ apis: ["Date", "setTimeout"], now: Date.now() });
+  const f = fixture();
+  try {
+    f.setRoom();
+    f.info.creatorId = "1";
+    f.command.playStatus = "PLAY";
+    f.command.targetSongId = "11";
+    f.onWrite((op) => {
+      if (op === "roomAdd") throw new Error("operation-unknown");
+    });
+    await f.service.takeOver("room-a");
+    finishRoomSong(f);
+    await tickRoom(t, 0);
+    await tickRoom(t, 8000);
+    assert.equal(f.calls.filter((call) => call.operation === "roomAdd").length, 1);
+    assert.ok(!f.calls.some((call) => call.operation === "roomCommand"));
+    assert.equal(f.service.snapshot().error, "room-next-unconfirmed");
+    f.playlist.displayList.result.push("12");
+    await tickRoom(t, 2000);
+    assert.equal(f.service.snapshot().songId, "12");
+    assert.equal(f.calls.filter((call) => call.operation === "roomCommand").length, 1);
+    assert.equal(f.calls.filter((call) => call.operation === "roomAdd").length, 1);
+  } finally {
+    f.service.stop();
+  }
+});
+
+test("an uncertain NEXT is not replayed and manual control clears the waiting state", async (t) => {
+  t.mock.timers.enable({ apis: ["Date", "setTimeout"], now: Date.now() });
+  const f = fixture();
+  try {
+    f.setRoom();
+    f.info.creatorId = "1";
+    f.command.playStatus = "PLAY";
+    f.onWrite((op) => {
+      if (op === "roomCommand") throw new Error("operation-unknown");
+    });
+    await f.service.takeOver("room-a");
+    finishRoomSong(f);
+    await tickRoom(t, 0);
+    await tickRoom(t, 8000);
+    assert.equal(f.calls.filter((call) => call.operation === "roomCommand").length, 1);
+    f.onWrite(() => {});
+    await f.service.control({ action: "next" });
+    assert.equal(f.service.snapshot().awaitingNext, false);
+    assert.equal(f.service.snapshot().songId, "11");
+  } finally {
+    f.service.stop();
+  }
+});
+
+test("recommendation read failure still advances the known ordinary room queue", async (t) => {
+  t.mock.timers.enable({ apis: ["Date", "setTimeout"], now: Date.now() });
+  const f = fixture();
+  try {
+    f.setRoom();
+    f.info.creatorId = "1";
+    f.command.playStatus = "PLAY";
+    f.command.targetSongId = "11";
+    f.playlist.displayList.rcmdSongIds = [];
+    f.onRecommendations(() => {
+      throw new Error("offline");
+    });
+    await f.service.takeOver("room-a");
+    finishRoomSong(f);
+    await tickRoom(t, 0);
+    assert.equal(f.service.snapshot().songId, "10");
+    assert.equal(f.service.snapshot().connected, true);
+    assert.ok(!f.calls.some((call) => call.operation === "roomAdd"));
+  } finally {
+    f.service.stop();
+  }
+});
+
+test("stopping during recommendation retrieval drops the late candidate and releases continuation", async (t) => {
+  t.mock.timers.enable({ apis: ["Date", "setTimeout"], now: Date.now() });
+  const f = fixture();
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  try {
+    f.setRoom();
+    f.info.creatorId = "1";
+    f.command.playStatus = "PLAY";
+    f.command.targetSongId = "11";
+    f.playlist.displayList.rcmdSongIds = [];
+    f.onRecommendations(() => held);
+    await f.service.takeOver("room-a");
+    finishRoomSong(f);
+    await tickRoom(t, 0);
+    f.service.stop();
+    release();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.equal(f.service.snapshot().awaitingNext, false);
+    assert.ok(
+      !f.calls.some((call) => call.operation === "roomAdd" || call.operation === "roomCommand"),
+    );
+  } finally {
+    release();
+    f.service.stop();
+  }
+});
+
+test("manual NEXT while recommendation is pending cancels automatic ADD and advances once", async (t) => {
+  t.mock.timers.enable({ apis: ["Date", "setTimeout"], now: Date.now() });
+  const f = fixture();
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  try {
+    f.setRoom();
+    f.info.creatorId = "1";
+    f.command.playStatus = "PLAY";
+    f.command.targetSongId = "11";
+    f.playlist.displayList.rcmdSongIds = [];
+    f.onRecommendations(() => held);
+    await f.service.takeOver("room-a");
+    finishRoomSong(f);
+    await tickRoom(t, 0);
+    t.mock.timers.tick(1000);
+    const manual = f.service.control({ action: "next" });
+    release();
+    await manual;
+    assert.ok(!f.calls.some((call) => call.operation === "roomAdd"));
+    assert.equal(f.calls.filter((call) => call.operation === "roomCommand").length, 1);
+    assert.equal(f.service.snapshot().songId, "10");
+  } finally {
+    release();
+    f.service.stop();
+  }
+});
+
+test("manual NEXT during the automatic NEXT acknowledgement does not skip another song", async (t) => {
+  t.mock.timers.enable({ apis: ["Date", "setTimeout"], now: Date.now() });
+  const f = fixture();
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  try {
+    f.setRoom();
+    f.info.creatorId = "1";
+    f.command.playStatus = "PLAY";
+    f.onWrite((operation) => (operation === "roomCommand" ? held : undefined));
+    await f.service.takeOver("room-a");
+    finishRoomSong(f);
+    await tickRoom(t, 0);
+    t.mock.timers.tick(1000);
+    const manual = f.service.control({ action: "next" });
+    release();
+    await manual;
+    assert.equal(f.calls.filter((call) => call.operation === "roomCommand").length, 1);
+    assert.equal(f.service.snapshot().songId, "11");
+  } finally {
+    release();
+    f.service.stop();
+  }
+});
+
+test("an unverified end event cannot trigger a room write", async (t) => {
+  t.mock.timers.enable({ apis: ["Date", "setTimeout"], now: Date.now() });
+  const f = fixture();
+  try {
+    f.setRoom();
+    f.info.creatorId = "1";
+    f.command.playStatus = "PLAY";
+    await f.service.takeOver("room-a");
+    const expected = { roomId: "room-a", songId: "10", commandSeq: 1 };
+    f.service.notifyEnded(expected);
+    f.playback.finished = true;
+    f.service.notifyEnded({ ...expected, roomId: "room-b" });
+    f.service.notifyEnded({ ...expected, commandSeq: 0 });
+    assert.equal(f.service.snapshot().awaitingNext, false);
+    await tickRoom(t, 6000);
+    assert.ok(!f.calls.some((call) => call.operation === "roomCommand"));
+  } finally {
+    f.service.stop();
+  }
+});
 
 test("independent accept verifies account and room, activates heartbeat without desktop actions", async () => {
   const f = fixture();

@@ -19,6 +19,7 @@ const mocks = vi.hoisted(() => ({
         playing: boolean;
         progressMs: number;
         ready: boolean;
+        finished: boolean;
       })
     | null,
 }));
@@ -51,7 +52,10 @@ vi.mock("@main/apis/netease", () => ({
 vi.mock("@main/store", () => ({ store: { get: () => mocks.configuredMode } }));
 vi.mock("@main/utils/proxy", () => ({ fetchWithProxy: vi.fn() }));
 vi.mock("@main/services/engine", () => ({
-  getPlayer: () => ({ getStatus: () => ({ state: mocks.engineState }), getPosition: () => 12 }),
+  getPlayer: () => ({
+    getStatus: () => ({ state: mocks.engineState, isFinished: false }),
+    getPosition: () => 12,
+  }),
 }));
 vi.mock("@main/utils/logger", () => ({ coreLog: { warn: vi.fn() } }));
 vi.mock("@main/services/nowPlaying", () => ({
@@ -134,6 +138,7 @@ describe("together shutdown publication", () => {
       playing: true,
       progressMs: 12000,
       ready: true,
+      finished: false,
     });
   });
   it.each(["local", "qqmusic", "subsonic"])("%s never supplies a room seed song", (source) => {

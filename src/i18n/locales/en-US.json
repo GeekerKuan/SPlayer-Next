@@ -2214,6 +2214,10 @@
     "crossDeviceResume": {
       "label": "Cross-device playback",
       "description": "Show recent plays from other devices and continue available song sessions"
+    },
+    "togetherAutoRecommend": {
+      "label": "Continue with recommendations",
+      "description": "Append room or account recommendations at the end of a normal room queue. A member can continue if the host does not respond; room roles remain unchanged."
     }
   },
   "collection": {
@@ -2438,7 +2442,8 @@
       "busy": "Please try again shortly",
       "disabled": "This feature is disabled",
       "no-resume": "No device session is available",
-      "unsupported-resume": "This device session is not supported yet"
+      "unsupported-resume": "This device session is not supported yet",
+      "room-next-unconfirmed": "The next track is unconfirmed. You can skip manually; uncertain commands will not be replayed."
     },
     "together": {
       "playbackOwner": "Only NetEase songs are supported. The official client plays room audio; SPlayer local playback is stopped.",

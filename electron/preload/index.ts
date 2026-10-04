@@ -69,6 +69,8 @@ const api = {
       ipcRenderer.invoke("together:accept", peerId, messageId),
     leave: () => ipcRenderer.invoke("together:leave"),
     control: (input: TogetherControl) => ipcRenderer.invoke("together:control", input),
+    ended: (input: import("@shared/types/together").TogetherPlaybackEnd) =>
+      ipcRenderer.invoke("together:ended", input),
     recommendations: () => ipcRenderer.invoke("together:recommendations"),
     add: (songId: string) => ipcRenderer.invoke("together:add", songId),
     onUpdate: (callback: (snapshot: TogetherSnapshot) => void) => {

@@ -79,6 +79,14 @@ const snapshot = (roomId: string): TogetherSnapshot => ({
   playbackRevision: 1,
 });
 describe("native room playback bridge", () => {
+  it("does not reload or resume an ended song while waiting for the next server command", async () => {
+    applyTogetherPlayback({ ...snapshot("room-a"), awaitingNext: true });
+    await Promise.resolve();
+    expect(f.resolve).not.toHaveBeenCalled();
+    expect(f.load).not.toHaveBeenCalled();
+    expect(f.seek).not.toHaveBeenCalled();
+    expect(f.play).not.toHaveBeenCalled();
+  });
   beforeEach(() => {
     f.backup = null;
     disposeTogetherPlayback();

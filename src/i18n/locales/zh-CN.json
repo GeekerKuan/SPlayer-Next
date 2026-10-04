@@ -2214,6 +2214,10 @@
     "crossDeviceResume": {
       "label": "跨端续播",
       "description": "拉取其他设备的最近播放，支持接续服务端提供的歌曲会话"
+    },
+    "togetherAutoRecommend": {
+      "label": "推荐自动续歌",
+      "description": "普通房间列表播完后追加房间推荐或本账号推荐；房主无响应时由房员接续，不改变房间身份。"
     }
   },
   "collection": {
@@ -2438,7 +2442,8 @@
       "busy": "正在处理，请稍后重试",
       "disabled": "此功能已关闭",
       "no-resume": "暂无可接续的设备会话",
-      "unsupported-resume": "该设备会话暂不支持在本机接续"
+      "unsupported-resume": "该设备会话暂不支持在本机接续",
+      "room-next-unconfirmed": "下一首尚未确认，可手动切歌；不会重复发送结果未知的指令。"
     },
     "together": {
       "playbackOwner": "一起听仅支持网易云歌曲，由官方客户端播放；SPlayer 本地音源暂停。",

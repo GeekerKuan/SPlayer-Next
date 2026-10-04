@@ -177,6 +177,12 @@ const playerCategory: SettingCategory = {
       tag: { text: "Beta" },
       items: [
         {
+          key: "togetherAutoRecommend",
+          type: "switch",
+          binding: { store: "settings", path: "system.player.togetherAutoRecommend" },
+          defaultValue: true,
+        },
+        {
           key: "togetherAvatarsInBar",
           type: "switch",
           binding: { store: "settings", path: "player.togetherAvatarsInBar" },

@@ -21,6 +21,8 @@ export interface TogetherSnapshot {
   playbackOwned?: boolean;
   commandSeq?: number;
   playbackRevision?: number;
+  /** 本曲已结束，等待服务器下一首；不能重新加载旧曲。 */
+  awaitingNext?: boolean;
   playMode?: "ORDER_LOOP" | "RANDOM" | "SINGLE_LOOP";
   /** 仅展示已核验的服务端推荐模式，不据此推断切换参数或会员权限。 */
   recommendationMode?: "heart";
@@ -42,6 +44,11 @@ export type TogetherControl =
   | { action: "pause" | "resume" | "next" | "previous" }
   | { action: "seek"; positionMs: number }
   | { action: "goto"; songId: string };
+export interface TogetherPlaybackEnd {
+  roomId: string;
+  songId: string;
+  commandSeq: number;
+}
 export interface TogetherApi {
   chooseClient: () => Promise<SocialResult<string>>;
   connect: (chooseClient?: boolean) => Promise<SocialResult<TogetherSnapshot>>;
@@ -58,6 +65,7 @@ export interface TogetherApi {
   accept: (peerId: string, messageId: string) => Promise<SocialResult<TogetherSnapshot>>;
   leave: () => Promise<SocialResult<TogetherSnapshot>>;
   control: (input: TogetherControl) => Promise<SocialResult<TogetherSnapshot>>;
+  ended: (input: TogetherPlaybackEnd) => Promise<SocialResult<void>>;
   recommendations: () => Promise<SocialResult<TogetherSong[]>>;
   add: (songId: string) => Promise<SocialResult<TogetherSnapshot>>;
   onUpdate: (callback: (snapshot: TogetherSnapshot) => void) => () => void;

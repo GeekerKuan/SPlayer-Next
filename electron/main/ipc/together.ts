@@ -85,6 +85,21 @@ export const registerTogetherIpc = (): void => {
   handle("create", (args) =>
     togetherService.create(z.tuple([socialPeer.optional()]).parse(args)[0]),
   );
+  handle("ended", (args) =>
+    togetherService.ended(
+      z
+        .tuple([
+          z
+            .object({
+              roomId: roomIdSchema,
+              songId: socialPeer,
+              commandSeq: z.number().int().nonnegative().safe(),
+            })
+            .strict(),
+        ])
+        .parse(args)[0],
+    ),
+  );
   handle("invite", (args) => togetherService.invite(z.tuple([socialPeer]).parse(args)[0]));
   handle("invitationLink", (args) => {
     z.tuple([]).parse(args);

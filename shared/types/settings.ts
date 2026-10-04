@@ -43,6 +43,8 @@ export type AudioOutputMode = "shared" | "exclusive";
 export interface PlayerSettings {
   /** 原生跨端续播与其他设备最近播放 */
   crossDeviceResume: boolean;
+  /** 普通一起听队列播放到末尾时补充推荐歌曲 */
+  togetherAutoRecommend: boolean;
   /** 加载后自动播放 */
   autoPlay: boolean;
   /** 记忆上次播放的歌曲 */

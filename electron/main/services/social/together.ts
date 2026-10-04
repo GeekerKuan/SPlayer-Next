@@ -17,7 +17,11 @@ import {
 } from "./playbackOwnership";
 import { createTogetherStats } from "./togetherStats";
 import { insertPlayEvent } from "@main/database/playStats";
-import type { TogetherControl, TogetherSnapshot } from "@shared/types/together";
+import type {
+  TogetherControl,
+  TogetherPlaybackEnd,
+  TogetherSnapshot,
+} from "@shared/types/together";
 import { loadRoomResume, saveRoomResume } from "./roomSession";
 import { coreLog } from "@main/utils/logger";
 const stats = createTogetherStats(insertPlayEvent);
@@ -39,6 +43,7 @@ const update = (snapshot: TogetherSnapshot): void => {
       snapshot.connected,
       snapshot.commandSeq,
       snapshot.playbackRevision,
+      snapshot.awaitingNext,
       snapshot.error,
       snapshot.recommendationMode,
       snapshot.members,
@@ -58,6 +63,7 @@ const native = new NativeTogetherService({
   saveResume: (value) =>
     saveRoomResume(value).catch((error) => coreLog.warn("保存一起听恢复记录失败", error)),
   ownership: setNativeTogetherOwnership,
+  autoRecommend: () => store.get("player.togetherAutoRecommend") !== false,
   halt: () => {
     const player = getPlayer();
     player.stop();
@@ -66,13 +72,15 @@ const native = new NativeTogetherService({
   playback: () => {
     const current = lightSnapshot();
     const player = getPlayer();
-    const state = player.getStatus().state;
+    const status = player.getStatus();
+    const state = status.state;
     return {
       songId: current.track?.source === "netease" && !current.track.cloud ? current.track.id : "",
-      playing: state === "playing",
+      playing: !status.isFinished && state === "playing",
       progressMs: toMs(player.getPosition()),
       // stop/loading 时旧歌曲标签仍可能存在，不能把残留的零进度当作房间播放状态。
-      ready: state === "playing" || state === "paused",
+      ready: !status.isFinished && (state === "playing" || state === "paused"),
+      finished: status.isFinished,
     };
   },
 });
@@ -170,6 +178,9 @@ export const togetherService = {
   },
   leave: () => remember(selected().leave()),
   control: (input: TogetherControl) => remember(selected().control(input)),
+  ended: async (input: TogetherPlaybackEnd): Promise<void> => {
+    if (mode === "native") native.notifyEnded(input);
+  },
   recommendations: () => selected().recommendations(),
   add: (songId: string) => remember(selected().add(songId)),
 };

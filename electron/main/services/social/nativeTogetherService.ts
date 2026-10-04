@@ -1,4 +1,9 @@
-import type { TogetherControl, TogetherSnapshot, TogetherSong } from "@shared/types/together";
+import type {
+  TogetherControl,
+  TogetherPlaybackEnd,
+  TogetherSnapshot,
+  TogetherSong,
+} from "@shared/types/together";
 import type { SocialSnapshot } from "@shared/types/social";
 import type { NativeOperation, NativeTransport } from "./netease-native/transport";
 import { decodeRecommendations } from "./netease-native/desktopActions";
@@ -23,7 +28,21 @@ interface Options {
   update: (snapshot: TogetherSnapshot) => void;
   ownership: (roomId: string, songId: string) => void;
   halt: () => void;
-  playback: () => { songId: string; playing: boolean; progressMs: number; ready: boolean };
+  playback: () => {
+    songId: string;
+    playing: boolean;
+    progressMs: number;
+    ready: boolean;
+    finished: boolean;
+  };
+  autoRecommend: () => boolean;
+}
+
+interface PendingEnd extends TogetherPlaybackEnd {
+  at: number;
+  candidate?: string;
+  sent: boolean;
+  failed?: boolean;
 }
 
 /** 独立 HTTP 房间不依赖 CDP；应用拥有已加入房间，页面卸载仅停止页面订阅。 */
@@ -49,14 +68,20 @@ export class NativeTogetherService {
   private clientSeq = 0;
   private versions: { userId: string | number; version: number; outerId?: string | null }[] = [];
   private playMode = "ORDER_LOOP";
+  private ordinaryQueue = false;
   private randomList: string[] = [];
   private metadata = new Map<string, TogetherSong>();
   private commandAt = 0;
   private commandProgress = 0;
+  private pendingEnd: PendingEnd | null = null;
   constructor(private options: Options) {}
 
   snapshot(): TogetherSnapshot {
-    return structuredClone(this.state);
+    return structuredClone({
+      ...this.state,
+      awaitingNext: !!this.pendingEnd,
+      ...(this.pendingEnd?.failed ? { error: "room-next-unconfirmed" } : {}),
+    });
   }
   private publish(): TogetherSnapshot {
     const next = this.snapshot();
@@ -130,6 +155,8 @@ export class NativeTogetherService {
     this.clientSeq = 0;
     this.lastHeartbeat = 0;
     this.commandAt = 0;
+    this.pendingEnd = null;
+    this.ordinaryQueue = false;
     this.state = {
       ...emptyTogetherSnapshot(),
       mode: "native",
@@ -162,6 +189,8 @@ export class NativeTogetherService {
     const status = parseRoomResponse(roomStatusSchema, await this.call("roomStatus")).data;
     const info = status.inRoom ? status.roomInfo : null;
     if (!info) {
+      this.pendingEnd = null;
+      this.ordinaryQueue = false;
       if (this.ownedRoom) this.options.halt();
       this.ownedRoom = "";
       this.options.ownership("", "");
@@ -185,10 +214,12 @@ export class NativeTogetherService {
       this.options.halt();
       this.options.ownership("", "");
     }
-    const playlist = parseRoomResponse(
-      roomPlaylistSchema,
-      await this.call("roomPlaylist", { roomId: info.roomId }),
-    ).data;
+    const playlistBody = await this.call("roomPlaylist", { roomId: info.roomId });
+    const playlist = parseRoomResponse(roomPlaylistSchema, playlistBody).data;
+    // 解码器兼容未知模式，但自动补歌只允许已观察的普通列表，避免污染未来模式。
+    const rawMode = (playlistBody.data as { playlist?: { listMode?: unknown } })?.playlist
+      ?.listMode;
+    this.ordinaryQueue = rawMode === undefined || rawMode === null || rawMode === "";
     const changedRoom = this.state.roomId !== info.roomId;
     if (changedRoom) {
       this.metadata.clear();
@@ -246,8 +277,9 @@ export class NativeTogetherService {
       ...(!this.ownedRoom ? { error: "room-not-owned" } : {}),
     };
     this.options.ownership(this.ownedRoom, this.ownedRoom ? songId : "");
+    if (this.pendingEnd && !this.matchesEnd(this.pendingEnd)) this.pendingEnd = null;
   }
-  private schedule(): void {
+  private schedule(delayMs?: number): void {
     if (!this.active || this.timer) return;
     this.timer = setTimeout(
       async () => {
@@ -261,6 +293,7 @@ export class NativeTogetherService {
           this.busy = true;
           try {
             await this.read();
+            await this.continueEnded();
             if (this.ownedRoom && Date.now() - this.lastHeartbeat >= 20000) await this.heartbeat();
             this.failures = 0;
             this.publish();
@@ -293,12 +326,123 @@ export class NativeTogetherService {
         }
         if (epoch === this.epoch) this.schedule();
       },
-      Math.min(15000, 2000 * 2 ** this.failures),
+      delayMs ?? Math.min(15000, 2000 * 2 ** this.failures),
     );
     this.timer.unref?.();
   }
   private requireOwned(): void {
     if (!this.ownedRoom || this.ownedRoom !== this.state.roomId) throw new Error("room-not-owned");
+  }
+  /** 自然结束仍由原播放器结算统计/定时关闭；主进程核对真实引擎与房间版本。 */
+  notifyEnded(input: TogetherPlaybackEnd): void {
+    if (this.pendingEnd || !this.active || !this.matchesEnd(input)) return;
+    const playback = this.options.playback();
+    if (!playback.finished || playback.songId !== input.songId) return;
+    this.pendingEnd = { ...input, at: Date.now(), sent: false };
+    this.publish();
+    if (!this.busy) {
+      if (this.timer) clearTimeout(this.timer);
+      this.timer = null;
+      this.schedule(0);
+    }
+  }
+  private matchesEnd(input: TogetherPlaybackEnd): boolean {
+    return (
+      !!this.ownedRoom &&
+      this.ownedRoom === input.roomId &&
+      this.state.roomId === input.roomId &&
+      this.state.songId === input.songId &&
+      this.state.commandSeq === input.commandSeq &&
+      this.state.playing
+    );
+  }
+  /** 房主先行；四秒无新指令时，仅最小 UID 房员接续，不伪造服务器角色迁移。 */
+  private canContinue(end: PendingEnd): boolean {
+    if (this.pendingEnd !== end || !this.matchesEnd(end)) return false;
+    if (this.creatorId === this.accountId) return true;
+    if (Date.now() - end.at < 4000) return false;
+    const peers = this.state.members
+      .map((member) => member.id)
+      .filter((id) => id !== this.creatorId)
+      .sort((a, b) => (BigInt(a) < BigInt(b) ? -1 : BigInt(a) > BigInt(b) ? 1 : 0));
+    return peers[0] === this.accountId;
+  }
+  /** 使用既有轮询串行续歌，不重放结果未知的 ADD/NEXT，也不替换整队列。 */
+  private async continueEnded(): Promise<void> {
+    const end = this.pendingEnd;
+    if (!end || end.sent || !this.canContinue(end)) return;
+    try {
+      if (
+        !end.candidate &&
+        this.options.autoRecommend() &&
+        this.ordinaryQueue &&
+        this.playMode !== "SINGLE_LOOP" &&
+        this.state.songs.length < 500
+      ) {
+        const order =
+          this.playMode === "RANDOM" && this.randomList.length
+            ? this.randomList
+            : this.state.songs.map((song) => song.id);
+        if (order.at(-1) === end.songId) {
+          let candidate: TogetherSong | undefined;
+          let valid = false;
+          try {
+            const notQueued = (song: TogetherSong): boolean =>
+              !this.state.songs.some((queued) => queued.id === song.id);
+            candidate = this.state.recommendations?.find(notQueued);
+            if (!candidate)
+              candidate = decodeRecommendations(await this.call("recommendations")).find(notQueued);
+            if (candidate && !this.metadata.has(candidate.id)) await this.songs([candidate.id]);
+            valid = !!candidate && this.metadata.has(candidate.id);
+          } catch (error) {
+            if (
+              this.controller.signal.aborted ||
+              /cancelled|account-|auth-required/.test(error instanceof Error ? error.message : "")
+            )
+              throw error;
+            // 推荐读取失败仍可续播原列表；不把推荐故障当作房间失效。
+          }
+          await this.read();
+          if (!this.canContinue(end)) return;
+          const currentOrder =
+            this.playMode === "RANDOM" && this.randomList.length
+              ? this.randomList
+              : this.state.songs.map((song) => song.id);
+          if (
+            candidate &&
+            valid &&
+            currentOrder.at(-1) === end.songId &&
+            this.state.songs.length < 500 &&
+            this.ordinaryQueue &&
+            this.playMode !== "SINGLE_LOOP" &&
+            this.options.autoRecommend()
+          ) {
+            // 发送前保存候选；未知结果只读确认，不再次发送相同 ADD。
+            end.candidate = candidate.id;
+            if (!this.state.songs.some((song) => song.id === candidate.id)) {
+              await this.addSong(candidate.id);
+              await this.read();
+            }
+          }
+        }
+      }
+      if (!this.canContinue(end)) return;
+      if (end.candidate && !this.state.songs.some((song) => song.id === end.candidate)) {
+        end.failed = true;
+        return;
+      }
+      // 必须在 await 前标记，迟到响应与重复 ended 不能重发切歌。
+      end.sent = true;
+      await this.command(
+        this.playMode === "SINGLE_LOOP"
+          ? { action: "goto", songId: end.songId }
+          : { action: "next" },
+      );
+      await this.read();
+    } catch (error) {
+      if (this.pendingEnd === end) end.failed = true;
+      throw error;
+    }
   }
   private async heartbeat(adoptingRoom?: string): Promise<void> {
     if (adoptingRoom) {
@@ -449,7 +593,16 @@ export class NativeTogetherService {
     };
   }
   control(input: TogetherControl): Promise<TogetherSnapshot> {
-    return this.mutation(() => this.command(input));
+    const end = this.pendingEnd;
+    // 手动操作先取消等待，正在读推荐的后台任务不能抢在用户请求前切歌。
+    this.pendingEnd = null;
+    return this.mutation(async () => {
+      if (end?.sent && this.state.songId !== end.songId) {
+        if (input.action === "next") return;
+        if (input.action === "seek") throw new Error("cancelled");
+      }
+      await this.command(input);
+    });
   }
   private async addSong(songId: string): Promise<void> {
     this.requireOwned();

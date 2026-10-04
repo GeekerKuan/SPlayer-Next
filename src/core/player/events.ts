@@ -11,11 +11,7 @@ import * as abLoop from "@/services/abLoop";
 import * as cacheScheduler from "@/services/cacheScheduler";
 import { setDeviceVolume } from "@/services/deviceVolume";
 import * as playStats from "./stats";
-import {
-  ownsTogetherPlayback,
-  getTogetherSession,
-  controlTogetherPlayback,
-} from "@/services/togetherSession";
+import { ownsTogetherPlayback, notifyTogetherTrackEnded } from "@/services/togetherSession";
 import {
   applySavedVolumeForActiveDevice,
   getActiveDeviceId,
@@ -55,12 +51,7 @@ const finishCurrentTrack = async (): Promise<void> => {
     // 定时关闭"等本曲结束"模式
     if (stopByTimer) return;
     if (ownsTogetherPlayback()) {
-      const room = getTogetherSession()!;
-      if (["waiting", "togetherOwner"].includes(room.status)) {
-        if (room.playMode === "SINGLE_LOOP")
-          await controlTogetherPlayback({ action: "goto", songId: room.songId });
-        else await nextTrack();
-      }
+      await notifyTogetherTrackEnded();
       return;
     }
     // 单曲循环：seek 回开头继续播放

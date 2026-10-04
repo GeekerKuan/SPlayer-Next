@@ -76,7 +76,7 @@ export const applyTogetherPlayback = (
   }
   if (onError) reportError = onError;
   setTogetherSession(snapshot);
-  const nextIdentity = `${snapshot.roomId}:${snapshot.playbackRevision ?? snapshot.commandSeq ?? 0}:${snapshot.playbackOwned}:${snapshot.connected}:${snapshot.songId}`;
+  const nextIdentity = `${snapshot.roomId}:${snapshot.playbackRevision ?? snapshot.commandSeq ?? 0}:${snapshot.playbackOwned}:${snapshot.connected}:${snapshot.songId}:${snapshot.awaitingNext}`;
   if (nextIdentity !== identity) {
     generation++;
     identity = nextIdentity;
@@ -155,6 +155,11 @@ const drain = async (): Promise<void> => {
       }
       status.playIndex = index;
       const track = tracks[index];
+      if (snapshot.awaitingNext) {
+        localSeekPending = false;
+        clearLocalSeek();
+        continue;
+      }
       const revision = snapshot.playbackRevision ?? snapshot.commandSeq ?? 0;
       const newCommand = revision > appliedSeq;
       if (

@@ -18,6 +18,15 @@ export const setTogetherSession = (snapshot: TogetherSnapshot): void => {
 export const ownsTogetherPlayback = (): boolean =>
   current?.mode === "native" && current.playbackOwned === true;
 export const getTogetherSession = (): TogetherSnapshot | null => current;
+/** 不通过用户控制队列；主进程在已有轮询中核对结束事件并处理房员接续。 */
+export const notifyTogetherTrackEnded = async (): Promise<void> => {
+  if (!ownsTogetherPlayback() || !current?.songId) return;
+  await window.api.together.ended({
+    roomId: current.roomId,
+    songId: current.songId,
+    commandSeq: current.commandSeq || 0,
+  });
+};
 export const playTogetherTrack = async (
   track: import("@shared/types/player").Track,
 ): Promise<void> => {

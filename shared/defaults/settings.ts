@@ -14,6 +14,7 @@ export const DYNAMIC_ISLAND_BASE_HEIGHT = 40;
 export const defaultSystemConfig: SystemConfig = {
   player: {
     crossDeviceResume: true,
+    togetherAutoRecommend: true,
     autoPlay: false,
     rememberLastTrack: true,
     fadeEnabled: true,
