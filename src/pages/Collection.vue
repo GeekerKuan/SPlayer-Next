@@ -7,6 +7,7 @@ import { getCollectionShareUrl } from "@/utils/format/shareUrl";
 import { useCopyText } from "@/composables/useCopyText";
 import { useCollectionSubscribe } from "@/composables/collection/useCollectionSubscribe";
 import { usePlaylistManage } from "@/composables/collection/usePlaylistManage";
+import { useTogetherStore } from "@/stores/together";
 import SongList from "@/components/list/SongList.vue";
 import { formatTime } from "@/utils/time";
 import * as player from "@/core/player";
@@ -24,6 +25,18 @@ const { t } = useI18n();
 const route = useRoute();
 const router = useRouter();
 const { copy } = useCopyText();
+const together = useTogetherStore();
+const canAddToRoom = computed(
+  () =>
+    together.snapshot.mode === "native" &&
+    together.snapshot.playbackOwned &&
+    collection.value?.tracks.some((track) => track.source === "netease" && !track.cloud),
+);
+/** 已完成原生歌单加载后整批加入；只使用既有数据，不额外拉取歌单。 */
+const addToRoom = async (): Promise<void> => {
+  if (loading.value || !canAddToRoom.value || !collection.value) return;
+  await together.addPlaylist(collection.value.tracks);
+};
 
 const source = route.params.source as TrackSource;
 const type = route.params.type as CollectionType;
@@ -354,6 +367,16 @@ onBeforeUnmount(() => {
                   <IconLucidePlay />
                 </template>
                 {{ t("common.playAll") }}
+              </SButton>
+              <SButton
+                v-if="canAddToRoom"
+                variant="secondary"
+                round
+                :disabled="loading || !!error || together.busy"
+                @click="addToRoom"
+              >
+                <template #icon><IconLucideListMusic /></template>
+                {{ t("social.together.addPlaylist") }}
               </SButton>
               <SButton
                 v-if="subscribe.available.value"

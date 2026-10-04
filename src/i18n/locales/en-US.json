@@ -2434,6 +2434,7 @@
       "room-not-owned": "SPlayer does not own this room. Leave the existing room and join again.",
       "mode-in-room": "Leave the room before changing the implementation.",
       "room-operation-failed": "The server did not confirm the room operation.",
+      "room-add-unconfirmed": "This addition has not been confirmed in the room yet. Check the queue shortly; the add request was not repeated.",
       "room-expired": "The room or heartbeat expired. Please join again.",
       "no-room-song": "No NetEase song is available for the room.",
       "room-songs-only": "Only NetEase songs in the room queue can play during Listen Together.",
@@ -2445,7 +2446,8 @@
       "disabled": "This feature is disabled",
       "no-resume": "No device session is available",
       "unsupported-resume": "This device session is not supported yet",
-      "room-next-unconfirmed": "The next track is unconfirmed. You can skip manually; uncertain commands will not be replayed."
+      "room-next-unconfirmed": "The next track is unconfirmed. You can skip manually; uncertain commands will not be replayed.",
+      "no-new-room-songs": "No new NetEase songs to add"
     },
     "together": {
       "playbackOwner": "Only NetEase songs are supported. The official client plays room audio; SPlayer local playback is stopped.",
@@ -2520,7 +2522,31 @@
       "previewLoading": "Reading invitation…",
       "noInvitationSong": "Song details are unavailable. The room song will sync after joining.",
       "inviteExpired": "This invitation has expired or the room is unavailable.",
-      "viewCurrentRoom": "View current room"
+      "viewCurrentRoom": "View current room",
+      "diagnostics": "Record listen-together diagnostics",
+      "diagnosticsHint": "Off by default, for this launch only. Records anonymous state and operation timing, without messages, cookies or invitation links.",
+      "openDiagnostics": "Open log folder",
+      "diagnosticsError": "Cannot access the diagnostics folder. Check its permissions.",
+      "addPlaylist": "Add playlist to Together",
+      "adding": "Adding to Together…",
+      "addList": "Add list to Together",
+      "addLoadedSongs": "Add loaded songs to Together",
+      "unsupportedCard": "This card is not supported. Choose NetEase songs, playlists or albums.",
+      "unsupportedMode": "This playback mode does not support Together yet",
+      "loadingPlaylist": "Loading playlist…",
+      "mutualFriends": "Mutual friends",
+      "followingFriends": "Following",
+      "followersFriends": "Followers",
+      "loadingFriends": "Loading friends…",
+      "friendsUnavailable": "Friends are temporarily unavailable. Choose a recent conversation or enter a friend ID.",
+      "moreFriends": "Load more friends",
+      "availableSongs": "Available songs",
+      "noAvailableSongs": "No songs available. Try another source.",
+      "playlistOnly": "Room playlist only (host)",
+      "playlistOnlyHint": "Automatic recommendations are off. Only the room playlist plays. You can still add songs from other pages.",
+      "memberRole": "Member · Following room playback",
+      "memberAddingHint": "You can add songs manually. The host has priority for automatic continuation; this device follows room updates.",
+      "memberWaiting": "Waiting for the next room song. If no update arrives, this device attempts continuation under the existing rules."
     },
     "chooseDetail": "Select a message on the left to view details",
     "openPlayer": "Expand player",
@@ -2537,6 +2563,12 @@
       "image": "Image",
       "general": "Message"
     },
-    "inviteActionHint": "Accept to join their room"
+    "inviteActionHint": "Accept to join their room",
+    "inviteService": "NetEase Cloud Music · Listen together",
+    "retrySend": "Resend this message",
+    "image": {
+      "retry": "Image failed to load. Click to retry",
+      "open": "View original image"
+    }
   }
 }

@@ -5,12 +5,29 @@ import type { SocialResult } from "@shared/types/social";
 
 let current: TogetherSnapshot | null = null;
 let control: ((input: TogetherControl) => Promise<SocialResult<TogetherSnapshot>>) | null = null;
+let addTracks:
+  ((tracks: readonly import("@shared/types/player").Track[]) => Promise<boolean>) | null = null;
+export const setTogetherAddHandler = (handler: typeof addTracks): void => {
+  addTracks = handler;
+};
+/** 原生队列插入入口在一起听期间改为增量加歌，不改写临时队列或触发播放。 */
+export const addTogetherTracks = async (
+  tracks: readonly import("@shared/types/player").Track[],
+): Promise<boolean> => {
+  if (!ownsTogetherPlayback()) return false;
+  if (!addTracks) {
+    toast.error(i18n.global.t("social.together.useRoomAdd"));
+    return false;
+  }
+  return addTracks(tracks);
+};
 export const setTogetherControlHandler = (handler: typeof control): void => {
   control = handler;
 };
 export const clearTogetherSession = (): void => {
   current = null;
   control = null;
+  addTracks = null;
 };
 export const setTogetherSession = (snapshot: TogetherSnapshot): void => {
   current = snapshot;
@@ -30,8 +47,12 @@ export const notifyTogetherTrackEnded = async (): Promise<void> => {
 export const playTogetherTrack = async (
   track: import("@shared/types/player").Track,
 ): Promise<void> => {
-  if (track.source !== "netease" || track.cloud || !current?.songs.some((s) => s.id === track.id)) {
+  if (track.source !== "netease" || track.cloud) {
     toast.error(i18n.global.t("social.errors.room-songs-only"));
+    return;
+  }
+  if (!current?.songs.some((s) => s.id === track.id)) {
+    toast.info(i18n.global.t("social.together.useRoomAdd"));
     return;
   }
   await controlTogetherPlayback({ action: "goto", songId: track.id });

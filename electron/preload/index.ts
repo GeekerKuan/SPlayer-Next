@@ -51,6 +51,11 @@ const getInstallType = (): "nsis" | "portable" | "appx" | "dmg" | "appimage" => 
 // 暴露给渲染进程的自定义 API
 const api = {
   together: {
+    friends: (kind: "following" | "followers", offset: number) =>
+      ipcRenderer.invoke("together:friends", kind, offset),
+    diagnostics: () => ipcRenderer.invoke("together:diagnostics"),
+    setDiagnostics: (enabled: boolean) => ipcRenderer.invoke("together:setDiagnostics", enabled),
+    openDiagnostics: () => ipcRenderer.invoke("together:openDiagnostics"),
     chooseClient: () => ipcRenderer.invoke("together:chooseClient"),
     connect: (chooseClient?: boolean) => ipcRenderer.invoke("together:connect", chooseClient),
     stop: () => ipcRenderer.invoke("together:stop"),
@@ -75,6 +80,7 @@ const api = {
       ipcRenderer.invoke("together:ended", input),
     recommendations: () => ipcRenderer.invoke("together:recommendations"),
     add: (songId: string) => ipcRenderer.invoke("together:add", songId),
+    addMany: (songIds: string[]) => ipcRenderer.invoke("together:addMany", songIds),
     onUpdate: (callback: (snapshot: TogetherSnapshot) => void) => {
       ipcRenderer.removeAllListeners("together:update");
       return subscribe("together:update", callback);
@@ -99,6 +105,7 @@ const api = {
     notifications: (kind: NoticeKind, cursor: number) =>
       ipcRenderer.invoke("social:notifications", kind, cursor),
     send: (input: SocialSendInput) => ipcRenderer.invoke("social:send", input),
+    retry: (messageId: string) => ipcRenderer.invoke("social:retry", messageId),
     localRead: (peerId: string, time: number) =>
       ipcRenderer.invoke("social:localRead", peerId, time),
     localReadNotices: (kind: NoticeKind, time: number) =>

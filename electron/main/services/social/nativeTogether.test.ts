@@ -66,6 +66,7 @@ const fixture = (resume?: { accountId: string; roomId: string; joinedAt: number 
   const playback = { songId: "10", playing: false, progressMs: 1000, ready: true, finished: false };
   let autoRecommend = true;
   let writeHook: ((operation: NativeOperation) => Promise<void> | void) | undefined;
+  let playlistHook: (() => Record<string, unknown> | undefined) | undefined;
   let recommendationHook: (() => Promise<void> | void) | undefined;
   let halts = 0;
   const savedRooms: ({ accountId: string; roomId: string; joinedAt: number } | null)[] = [];
@@ -91,6 +92,16 @@ const fixture = (resume?: { accountId: string; roomId: string; joinedAt: number 
       call: async (operation, data) => {
         calls.push({ operation, data });
         switch (operation) {
+          case "userFollows":
+            return {
+              follow: [
+                { userId: 2, nickname: "friend", mutual: true },
+                { userId: 1, nickname: "self" },
+              ],
+              more: true,
+            };
+          case "userFollowers":
+            return { followeds: [{ userId: 3, nickname: "follower" }], more: false };
           case "shortLink":
             if (shortFailure) throw new Error("operation-unknown");
             return { data: { shortUrl } };
@@ -101,7 +112,11 @@ const fixture = (resume?: { accountId: string; roomId: string; joinedAt: number 
             inRoom = true;
             return { data: { roomInfo: info } };
           case "roomPlaylist":
-            return { data: { playlist, playCommand: command.targetSongId ? command : null } };
+            return (
+              playlistHook?.() ?? {
+                data: { playlist, playCommand: command.targetSongId ? command : null },
+              }
+            );
           case "roomCreate":
             inRoom = true;
             info.creatorId = "1";
@@ -136,10 +151,13 @@ const fixture = (resume?: { accountId: string; roomId: string; joinedAt: number 
             Object.assign(command, sent, { serverSeq: ++serverSeq });
             return { data: { result: true } };
           }
-          case "roomAdd":
+          case "roomAdd": {
             await writeHook?.(operation);
-            playlist.displayList.result.push(...JSON.parse(String(data.playlistParam)).displayList);
+            const sent = JSON.parse(String(data.playlistParam));
+            playlist.displayList.result.push(...sent.displayList);
+            playlist.version = sent.version;
             return { data: { result: true } };
+          }
           case "roomLeave":
             if (leaveOutcome === "unknown") throw new Error("offline");
             if (leaveOutcome === "unchanged") return { data: { success: false } };
@@ -172,6 +190,9 @@ const fixture = (resume?: { accountId: string; roomId: string; joinedAt: number 
     },
     onWrite: (hook: (operation: NativeOperation) => Promise<void> | void) => {
       writeHook = hook;
+    },
+    onPlaylist: (hook: () => Record<string, unknown> | undefined) => {
+      playlistHook = hook;
     },
     onRecommendations: (hook: () => Promise<void> | void) => {
       recommendationHook = hook;
@@ -391,6 +412,8 @@ test("unknown ADD is not replayed; a later queue confirmation permits exactly on
     await f.service.takeOver("room-a");
     finishRoomSong(f);
     await tickRoom(t, 0);
+    await tickRoom(t, 300);
+    await tickRoom(t, 900);
     await tickRoom(t, 8000);
     assert.equal(f.calls.filter((call) => call.operation === "roomAdd").length, 1);
     assert.ok(!f.calls.some((call) => call.operation === "roomCommand"));
@@ -482,7 +505,7 @@ test("stopping during recommendation retrieval drops the late candidate and rele
   }
 });
 
-test("manual NEXT while recommendation is pending cancels automatic ADD and advances once", async (t) => {
+test("manual NEXT takes over a pending recommendation and advances once without a competing automatic write", async (t) => {
   t.mock.timers.enable({ apis: ["Date", "setTimeout"], now: Date.now() });
   const f = fixture();
   let release!: () => void;
@@ -503,9 +526,9 @@ test("manual NEXT while recommendation is pending cancels automatic ADD and adva
     const manual = f.service.control({ action: "next" });
     release();
     await manual;
-    assert.ok(!f.calls.some((call) => call.operation === "roomAdd"));
+    assert.equal(f.calls.filter((call) => call.operation === "roomAdd").length, 1);
     assert.equal(f.calls.filter((call) => call.operation === "roomCommand").length, 1);
-    assert.equal(f.service.snapshot().songId, "10");
+    assert.equal(f.service.snapshot().songId, "13");
   } finally {
     release();
     f.service.stop();
@@ -978,6 +1001,81 @@ test("missing official song details never generate a room write", async () => {
   assert.equal(f.calls.filter((call) => call.operation === "roomAdd").length, 0);
   f.service.stop();
 });
+
+test("manual ADD refreshes remote versions and tolerates a delayed playlist echo without repeating writes", async (t) => {
+  let now = Date.now();
+  t.mock.method(Date, "now", () => now);
+  const f = fixture();
+  try {
+    await f.service.accept("2", "invite");
+    f.playlist.version[1].version = 8;
+    let written = false;
+    let reads = 0;
+    f.onWrite((op) => {
+      if (op === "roomAdd") written = true;
+    });
+    f.onPlaylist(() => {
+      if (written && reads++ === 0)
+        return {
+          data: {
+            playlist: {
+              ...f.playlist,
+              displayList: { ...f.playlist.displayList, result: ["10", "11"] },
+            },
+            playCommand: f.command,
+          },
+        };
+      return undefined;
+    });
+    now += 1000;
+    const next = await f.service.add("13");
+    assert.ok(next.songs.some((song) => song.id === "13"));
+    const writes = f.calls.filter((call) => call.operation === "roomAdd");
+    assert.equal(writes.length, 1);
+    assert.equal(JSON.parse(String(writes[0].data.playlistParam)).version[1].version, 8);
+  } finally {
+    f.service.stop();
+  }
+});
+
+test("unknown ADD confirmed by the room succeeds once, while cancellation clears its confirmation wait", async (t) => {
+  let now = Date.now();
+  t.mock.method(Date, "now", () => now);
+  const f = fixture();
+  try {
+    await f.service.accept("2", "invite");
+    now += 1000;
+    f.onWrite((op) => {
+      if (op === "roomAdd") {
+        f.playlist.displayList.result.push("13");
+        throw new Error("operation-unknown");
+      }
+    });
+    const next = await f.service.add("13");
+    assert.ok(next.songs.some((song) => song.id === "13"));
+    assert.equal(f.calls.filter((call) => call.operation === "roomAdd").length, 1);
+    now += 1000;
+    f.onWrite((op) => {
+      if (op === "roomAdd") throw new Error("operation-unknown");
+    });
+    let didRead!: () => void;
+    const observed = new Promise<void>((resolve) => {
+      didRead = resolve;
+    });
+    f.onPlaylist(() => {
+      if (f.calls.filter((call) => call.operation === "roomAdd").length > 1) didRead();
+      return undefined;
+    });
+    const pending = f.service.add("12");
+    const rejected = assert.rejects(pending, /Abort|cancelled/);
+    await observed;
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    f.service.stop();
+    await rejected;
+  } finally {
+    f.service.stop();
+  }
+});
 test("expired invitation and negative heartbeat do not report successful join", async () => {
   const f = fixture();
   f.social.messages["2"][0].time = Date.now() - 700000;
@@ -1141,6 +1239,177 @@ test("an unexpected short-link domain falls back to the official room URL", asyn
     assert.equal(link.hostname, "st.music.163.com");
     assert.equal(link.searchParams.get("roomId"), "room-a");
     assert.equal(f.calls.filter((call) => call.operation === "shortLink").length, 1);
+  } finally {
+    f.service.stop();
+  }
+});
+
+test("playlist addition deduplicates into one incremental ADD and one confirmation read", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: Date.now() });
+  const f = fixture();
+  try {
+    await f.service.accept("2", "invite");
+    t.mock.timers.tick(1000);
+    f.calls.length = 0;
+    const next = await f.service.addMany(["10", "12", "12", "13"]);
+    assert.deepEqual(
+      next.songs.map((song) => song.id),
+      ["10", "11", "12", "13"],
+    );
+    const writes = f.calls.filter((call) => call.operation === "roomAdd");
+    assert.equal(writes.length, 1);
+    const data = JSON.parse(String(writes[0].data.playlistParam));
+    assert.deepEqual(data.displayList, ["12", "13"]);
+    assert.deepEqual(data.randomList, ["12", "13"]);
+    assert.equal(data.version[0].version, 4);
+    assert.equal(f.calls.filter((call) => call.operation === "roomStatus").length, 2);
+    assert.ok(f.calls.filter((call) => call.operation === "roomSongs").length <= 1);
+  } finally {
+    f.service.stop();
+  }
+});
+test("batch capacity and unverified songs fail without partial writes", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: Date.now() });
+  for (const full of [false, true]) {
+    const f = fixture();
+    try {
+      await f.service.accept("2", "invite");
+      t.mock.timers.tick(1000);
+      if (full)
+        f.playlist.displayList.result = Array.from({ length: 500 }, (_, i) => String(i + 100));
+      f.calls.length = 0;
+      await assert.rejects(
+        f.service.addMany(full ? ["12", "13"] : ["999"]),
+        full ? /queue-full/ : /invalid-song/,
+      );
+      assert.equal(
+        f.calls.some((call) => call.operation === "roomAdd"),
+        false,
+      );
+    } finally {
+      f.service.stop();
+    }
+  }
+});
+test("personal fallback recommendations share concurrent reads and expire within the same room", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: 100000 });
+  const f = fixture();
+  try {
+    const [first, second] = await Promise.all([
+      f.service.recommendations(),
+      f.service.recommendations(),
+    ]);
+    assert.deepEqual(first, second);
+    first[0].name = "mutated";
+    assert.notEqual((await f.service.recommendations())[0].name, "mutated");
+    assert.equal(f.calls.filter((call) => call.operation === "recommendations").length, 1);
+    t.mock.timers.tick(60000);
+    await f.service.recommendations();
+    assert.equal(f.calls.filter((call) => call.operation === "recommendations").length, 2);
+  } finally {
+    f.service.stop();
+  }
+});
+
+test("host appends once while the last track is playing, then next uses the appended track", async (t) => {
+  t.mock.timers.enable({ apis: ["Date", "setTimeout"], now: Date.now() });
+  const f = fixture();
+  try {
+    f.setRoom();
+    f.info.creatorId = "1";
+    Object.assign(f.command, { targetSongId: "11", playStatus: "PLAY" });
+    Object.assign(f.playback, { songId: "11", playing: true });
+    await f.service.takeOver("room-a");
+    await tickRoom(t, 2000);
+    assert.deepEqual(
+      f.service.snapshot().songs.map((song) => song.id),
+      ["10", "11", "12"],
+    );
+    assert.equal(f.service.snapshot().songId, "11");
+    await tickRoom(t, 2000);
+    assert.equal(f.calls.filter((call) => call.operation === "roomAdd").length, 1);
+    await f.service.control({ action: "next" });
+    assert.equal(f.service.snapshot().songId, "12");
+    const sent = JSON.parse(
+      String(f.calls.find((call) => call.operation === "roomCommand")!.data.commandInfo),
+    );
+    assert.equal(sent.commandType, "NEXT");
+  } finally {
+    f.service.stop();
+  }
+});
+
+test("manual next at a paused tail adds a recommendation, while disabling recommendations loops the queue", async (t) => {
+  t.mock.timers.enable({ apis: ["Date", "setTimeout"], now: Date.now() });
+  for (const enabled of [true, false]) {
+    const f = fixture();
+    try {
+      f.setRoom();
+      f.info.creatorId = "1";
+      f.command.targetSongId = "11";
+      f.playback.songId = "11";
+      f.setAutoRecommend(enabled);
+      await f.service.takeOver("room-a");
+      await tickRoom(t, 600);
+      await f.service.control({ action: "next" });
+      assert.equal(f.service.snapshot().songId, enabled ? "12" : "10");
+      assert.equal(f.calls.filter((call) => call.operation === "roomAdd").length, enabled ? 1 : 0);
+    } finally {
+      f.service.stop();
+    }
+  }
+});
+
+test("members do not proactively append while playing and an uncertain append is never replayed at song end", async (t) => {
+  t.mock.timers.enable({ apis: ["Date", "setTimeout"], now: Date.now() });
+  const member = fixture();
+  try {
+    member.setRoom();
+    member.command.targetSongId = "11";
+    member.command.playStatus = "PLAY";
+    Object.assign(member.playback, { songId: "11", playing: true });
+    await member.service.takeOver("room-a");
+    await tickRoom(t, 2000);
+    assert.equal(member.calls.filter((call) => call.operation === "roomAdd").length, 0);
+  } finally {
+    member.service.stop();
+  }
+  const f = fixture();
+  try {
+    f.setRoom();
+    f.info.creatorId = "1";
+    Object.assign(f.command, { targetSongId: "11", playStatus: "PLAY" });
+    Object.assign(f.playback, { songId: "11", playing: true });
+    f.onWrite((op) => {
+      if (op === "roomAdd") throw new Error("operation-unknown");
+    });
+    await f.service.takeOver("room-a");
+    await tickRoom(t, 2000);
+    await tickRoom(t, 300);
+    await tickRoom(t, 900);
+    finishRoomSong(f);
+    await tickRoom(t, 0);
+    await tickRoom(t, 8000);
+    assert.equal(f.calls.filter((call) => call.operation === "roomAdd").length, 1);
+    assert.equal(f.calls.filter((call) => call.operation === "roomCommand").length, 0);
+  } finally {
+    f.service.stop();
+  }
+});
+
+test("friend directory caches each account page, excludes self and validates pagination", async () => {
+  const f = fixture();
+  try {
+    const page = await f.service.friends("following", 0);
+    assert.deepEqual(page.items, [{ id: "2", name: "friend", mutual: true }]);
+    page.items.length = 0;
+    assert.equal((await f.service.friends("following", 0)).items.length, 1);
+    assert.equal(f.calls.filter((call) => call.operation === "userFollows").length, 1);
+    assert.equal((await f.service.friends("followers", 0)).items[0].id, "3");
+    await assert.rejects(f.service.friends("following", 99), /invalid-input/);
+    await assert.rejects(f.service.friends("following", 500), /invalid-input/);
+    f.social.accountId = "2";
+    await assert.rejects(f.service.friends("following", 0), /account-changed/);
   } finally {
     f.service.stop();
   }

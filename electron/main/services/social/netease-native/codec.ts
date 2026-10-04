@@ -98,6 +98,12 @@ const decodeCard = (value: Record<string, unknown>): SocialContent["card"] => {
     (id.success && resourceUrl[type]
       ? `https://music.163.com/#/${resourceUrl[type]}?id=${id.data}`
       : undefined);
+  const size = z
+    .object({
+      width: z.number().int().min(1).max(32768),
+      height: z.number().int().min(1).max(32768),
+    })
+    .safeParse(raw);
   return {
     type,
     id: id.success ? id.data : undefined,
@@ -105,6 +111,7 @@ const decodeCard = (value: Record<string, unknown>): SocialContent["card"] => {
     subtitle: text(raw.subTitle ?? raw.description),
     cover,
     url,
+    ...(type === "image" && size.success ? size.data : {}),
   };
 };
 

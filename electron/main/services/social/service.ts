@@ -413,6 +413,25 @@ export class SocialService {
     this.publish();
     return structuredClone(this.state);
   }
+  /** 仅允许本账号明确失败的文本重试，沿用原消息身份；未知发送不能盲目重放。 */
+  async retry(messageId: string): Promise<SocialMessage> {
+    await this.ensureAccount();
+    let message: SocialMessage | undefined;
+    for (const items of Object.values(this.state.messages)) {
+      message = items.find((item) => item.id === messageId);
+      if (message) break;
+    }
+    if (
+      !message ||
+      message.senderId !== this.state.accountId ||
+      message.delivery !== "failed" ||
+      message.kind !== "text" ||
+      !message.clientId
+    )
+      throw new Error("invalid-input");
+    this.sends.delete(message.clientId);
+    return this.send({ peerId: message.peerId, text: message.text, clientId: message.clientId });
+  }
   async send(raw: SocialSendInput): Promise<SocialMessage> {
     const input = socialSend.parse(raw);
     await this.ensureAccount();

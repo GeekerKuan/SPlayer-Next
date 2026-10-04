@@ -1,5 +1,6 @@
 import { clipboard, dialog, ipcMain, shell } from "electron";
 import { createHash } from "node:crypto";
+import { mkdir } from "node:fs/promises";
 import { fetchWithProxy } from "@main/utils/proxy";
 import {
   extractTogetherShare,
@@ -9,9 +10,10 @@ import {
 } from "@shared/utils/togetherLink";
 import type { TogetherClipboardInvite } from "@shared/types/together";
 import { z } from "zod";
+import { getNeteaseCookies } from "@main/apis/netease";
 import { store } from "@main/store";
 import { getMainWindow } from "@main/window/main";
-import { togetherService } from "@main/services/social/together";
+import { togetherDiagnostics, togetherService } from "@main/services/social/together";
 import { socialPeer } from "@main/services/social/validation";
 import { roomIdSchema } from "@main/services/social/netease-native/roomCodec";
 import type { SocialResult } from "@shared/types/social";
@@ -30,11 +32,32 @@ export const registerTogetherIpc = (): void => {
         event.senderFrame !== event.sender.mainFrame
       )
         return { ok: false, error: "forbidden" };
-      if (pending.has(channel)) return { ok: false, error: "rate-limited" };
-      pending.add(channel);
+      const pendingKey =
+        channel === "friends"
+          ? `${channel}:${args[0] === "followers" ? "followers" : "following"}`
+          : channel;
+      if (pending.has(pendingKey)) return { ok: false, error: "rate-limited" };
+      pending.add(pendingKey);
+      const started = Date.now();
+      const diagnostic = !["diagnostics", "setDiagnostics", "openDiagnostics"].includes(channel);
+      if (diagnostic) togetherDiagnostics.record("operation-start", { operation: channel });
       try {
-        return { ok: true, data: await operation(args) };
+        const data = await operation(args);
+        if (diagnostic)
+          togetherDiagnostics.record("operation-end", {
+            operation: channel,
+            ok: true,
+            durationMs: Date.now() - started,
+          });
+        return { ok: true, data };
       } catch (error) {
+        if (diagnostic)
+          togetherDiagnostics.record("operation-end", {
+            operation: channel,
+            ok: false,
+            durationMs: Date.now() - started,
+            error: error instanceof Error ? error.message : "other",
+          });
         return {
           ok: false,
           error:
@@ -45,10 +68,33 @@ export const registerTogetherIpc = (): void => {
                 : "offline",
         };
       } finally {
-        pending.delete(channel);
+        pending.delete(pendingKey);
       }
     });
   };
+  handle("diagnostics", async (args) => {
+    z.tuple([]).parse(args);
+    return togetherDiagnostics.status();
+  });
+  handle("friends", (args) =>
+    togetherService.friends(
+      ...z
+        .tuple([
+          z.enum(["following", "followers"]),
+          z.number().int().min(0).max(400).multipleOf(100),
+        ])
+        .parse(args),
+    ),
+  );
+  handle("setDiagnostics", (args) =>
+    togetherDiagnostics.setEnabled(z.tuple([z.boolean()]).parse(args)[0]),
+  );
+  handle("openDiagnostics", async (args) => {
+    z.tuple([]).parse(args);
+    await mkdir(togetherDiagnostics.directory, { recursive: true });
+    if (await shell.openPath(togetherDiagnostics.directory))
+      throw new Error("diagnostics-unavailable");
+  });
   const chooseClient = async (): Promise<string> => {
     if (process.platform !== "win32") throw new Error("windows-client-required");
     const selection = await dialog.showOpenDialog(getMainWindow()!, {
@@ -121,7 +167,10 @@ export const registerTogetherIpc = (): void => {
     z.tuple([]).parse(args);
     if (!getMainWindow()?.isFocused()) return null;
     const text = clipboard.readText();
-    const digest = createHash("sha256").update(text).digest("hex");
+    const digest = createHash("sha256")
+      .update(text)
+      .update(getNeteaseCookies().MUSIC_U || "")
+      .digest("hex");
     if (digest === clipboardDigest) return null;
     const share = extractTogetherShare(text);
     if (!share) {
@@ -240,5 +289,8 @@ export const registerTogetherIpc = (): void => {
     return togetherService.recommendations();
   });
   handle("add", (args) => togetherService.add(z.tuple([socialPeer]).parse(args)[0]));
+  handle("addMany", (args) =>
+    togetherService.addMany(z.tuple([z.array(socialPeer).min(1).max(500)]).parse(args)[0]),
+  );
 };
 const onDestroyed = (): void => togetherService.stop();

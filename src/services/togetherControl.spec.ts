@@ -76,6 +76,7 @@ describe("room seek reconciliation", () => {
       data: { ...initial, commandSeq: 11, progressMs: 35000, playbackRevision: 2 },
     });
     await result;
+    // 提前收到匹配确认后不再保留保护定时器，后续同一版本更新也无需强制 seek。
     expect(f.publish.mock.lastCall?.[2]).toBe(true);
     f.controls.ingest({ ...initial, commandSeq: 12, progressMs: 16000, playbackRevision: 3 });
     expect(f.publish.mock.lastCall?.[2]).toBe(false);
@@ -148,4 +149,47 @@ describe("room seek reconciliation", () => {
     f.controls.dispose();
     expect(vi.getTimerCount()).toBe(0);
   });
+  it.each(["pause", "resume"] as const)(
+    "%s applies locally and a matching ACK neither seeks nor refreshes again",
+    async (action) => {
+      const publish = vi.fn(),
+        refresh = vi.fn();
+      let finish!: (value: SocialResult<TogetherSnapshot>) => void;
+      const send = vi.fn(
+        () =>
+          new Promise<SocialResult<TogetherSnapshot>>((resolve) => {
+            finish = resolve;
+          }),
+      );
+      const controls = new TogetherControls({ publish, refresh, send, position: () => 15000 });
+      const first = { ...initial, playing: action === "pause" };
+      controls.ingest(first);
+      const job = controls.control({ action });
+      expect(publish.mock.lastCall?.[0]).toMatchObject({
+        progressMs: 15000,
+        playing: action === "resume",
+      });
+      expect(publish.mock.lastCall?.slice(1)).toEqual([false, true]);
+      await vi.advanceTimersByTimeAsync(500);
+      controls.ingest({ ...first, progressMs: 10500 });
+      expect(publish.mock.lastCall?.[0].playing).toBe(action === "resume");
+      finish({
+        ok: true,
+        data: {
+          ...first,
+          progressMs: 15000,
+          playing: action === "resume",
+          commandSeq: 11,
+          playbackRevision: 2,
+        },
+      });
+      await job;
+      expect(publish.mock.lastCall?.[2]).toBe(true);
+      await vi.advanceTimersByTimeAsync(20000);
+      expect(refresh).not.toHaveBeenCalled();
+      expect(send).toHaveBeenCalledOnce();
+      controls.dispose();
+      expect(vi.getTimerCount()).toBe(0);
+    },
+  );
 });

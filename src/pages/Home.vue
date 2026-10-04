@@ -11,8 +11,83 @@ import { useHomeDiscover } from "@/composables/home/useHomeDiscover";
 import { useFloatingPlayerBar } from "@/composables/useFloatingPlayerBar";
 import { navigateToPlaylist, navigateToArtist, navigateToAlbum } from "@/utils/navigate";
 import * as player from "@/core/player";
+import { useTogetherStore } from "@/stores/together";
+import { loadCollection } from "@/services/collection";
+import type { Collection } from "@/types/collection";
+import { toast } from "@/composables/useToast";
 
 const { t } = useI18n();
+const together = useTogetherStore();
+const roomActionLabel = computed(() =>
+  together.snapshot.mode === "native" && together.snapshot.playbackOwned
+    ? t("social.together.addToRoom")
+    : undefined,
+);
+const roomCardLoading = ref(false);
+let roomCardAbort: AbortController | null = null;
+onUnmounted(() => {
+  roomCardAbort?.abort();
+  roomCardAbort = null;
+});
+watch(
+  () => together.snapshot.roomId,
+  () => roomCardAbort?.abort(),
+);
+/** 首页歌单/专辑只在用户点击后加载；复用原加载器，退出/换房后不发送 ADD。 */
+const addCardToRoom = async (
+  item: CoverItem,
+  kind: "playlist" | "album" | "artist",
+): Promise<void> => {
+  if (!roomActionLabel.value || roomCardLoading.value || together.busy) return;
+  if (kind === "artist") {
+    toast.info(t("social.together.unsupportedCard"));
+    return;
+  }
+  const controller = new AbortController();
+  roomCardAbort = controller;
+  const roomId = together.snapshot.roomId;
+  const notice = toast.loading(t("social.together.loadingPlaylist"), { duration: 0 });
+  const timeout = setTimeout(() => controller.abort("request-timeout"), 30000);
+  const cancel = (): void => {
+    clearTimeout(timeout);
+    notice.close();
+  };
+  controller.signal.addEventListener("abort", cancel, { once: true });
+  roomCardLoading.value = true;
+  let data: Collection | null = null;
+  try {
+    await loadCollection("netease", kind, item.id, {
+      signal: controller.signal,
+      onUpdate: (value) => {
+        data = value;
+        if (value && (value.trackCount ?? value.tracks.length) > 500)
+          controller.abort("queue-full");
+      },
+    });
+    if (controller.signal.aborted || roomId !== together.snapshot.roomId) return;
+    // 回调写入发生在异步加载过程中，只有最终成功结果可以提交。
+    const tracks = (data as Collection | null)?.tracks;
+    if (!tracks?.length) {
+      toast.info(t("social.together.unsupportedCard"));
+      return;
+    }
+    await together.addPlaylist(tracks);
+  } catch {
+    if (!controller.signal.aborted && roomId === together.snapshot.roomId)
+      toast.error(t("social.errors.offline"));
+  } finally {
+    clearTimeout(timeout);
+    controller.signal.removeEventListener("abort", cancel);
+    notice.close();
+    if (controller.signal.reason === "queue-full") toast.warning(t("social.errors.queue-full"));
+    else if (controller.signal.reason === "request-timeout")
+      toast.error(t("social.errors.offline"));
+    if (roomCardAbort === controller) {
+      roomCardAbort = null;
+      roomCardLoading.value = false;
+    }
+  }
+};
 const { isFloatingBar } = useFloatingPlayerBar();
 
 /** 头部 */
@@ -119,7 +194,7 @@ const openAlbum = (item: CoverItem): void => {
               </SButton>
               <SButton variant="secondary" round :disabled="heroLoading" @click="addHeroToQueue">
                 <template #icon><IconLucidePlus /></template>
-                {{ t("home.hero.addQueue") }}
+                {{ t(roomActionLabel ? "social.together.addToRoom" : "home.hero.addQueue") }}
               </SButton>
             </div>
           </div>
@@ -140,6 +215,17 @@ const openAlbum = (item: CoverItem): void => {
               <span class="max-w-24 shrink-0 truncate text-xs text-on-surface-variant/45">
                 {{ artistName(track) }}
               </span>
+              <SButton
+                v-if="roomActionLabel"
+                size="small"
+                variant="ghost"
+                circle
+                :aria-label="roomActionLabel"
+                :disabled="together.busy"
+                @click.stop="together.addPlaylist([track])"
+              >
+                <template #icon><IconLucideListPlus /></template>
+              </SButton>
             </li>
           </ul>
         </div>
@@ -205,6 +291,17 @@ const openAlbum = (item: CoverItem): void => {
             <span class="shrink-0 text-xs tabular-nums text-on-surface-variant/45">
               {{ t("home.continue.playCount", { count: item.playCount }, item.playCount) }}
             </span>
+            <SButton
+              v-if="roomActionLabel"
+              size="small"
+              variant="ghost"
+              circle
+              :aria-label="roomActionLabel"
+              :disabled="together.busy"
+              @click.stop="together.addPlaylist([item.track])"
+            >
+              <template #icon><IconLucideListPlus /></template>
+            </SButton>
           </SCard>
         </div>
         <div
@@ -221,7 +318,14 @@ const openAlbum = (item: CoverItem): void => {
           <h3 class="text-lg font-semibold text-on-surface">{{ recommendTitle }}</h3>
           <p class="mt-0.5 text-xs text-on-surface-variant/50">{{ recommendSubtitle }}</p>
         </div>
-        <CoverList :items="recommendPlaylists" :virtual="false" :gap="16" @click="openPlaylist" />
+        <CoverList
+          :items="recommendPlaylists"
+          :virtual="false"
+          :gap="16"
+          :add-action-label="roomActionLabel"
+          @add-to-together="addCardToRoom($event, 'playlist')"
+          @click="openPlaylist"
+        />
       </section>
       <!-- 雷达歌单 -->
       <section v-if="radarPlaylists.length > 0" class="flex flex-col gap-3">
@@ -229,7 +333,14 @@ const openAlbum = (item: CoverItem): void => {
           <h3 class="text-lg font-semibold text-on-surface">{{ t("home.radar.title") }}</h3>
           <p class="mt-0.5 text-xs text-on-surface-variant/50">{{ t("home.radar.subtitle") }}</p>
         </div>
-        <CoverList :items="radarPlaylists" :virtual="false" :gap="16" @click="openPlaylist" />
+        <CoverList
+          :items="radarPlaylists"
+          :virtual="false"
+          :gap="16"
+          :add-action-label="roomActionLabel"
+          @add-to-together="addCardToRoom($event, 'playlist')"
+          @click="openPlaylist"
+        />
       </section>
       <!-- 歌手推荐 -->
       <section v-if="artists.length > 0" class="flex flex-col gap-3">
@@ -243,6 +354,8 @@ const openAlbum = (item: CoverItem): void => {
           :min-size="120"
           :virtual="false"
           :gap="16"
+          :add-action-label="roomActionLabel"
+          @add-to-together="addCardToRoom($event, 'artist')"
           @click="openArtist"
         />
       </section>
@@ -252,7 +365,14 @@ const openAlbum = (item: CoverItem): void => {
           <h3 class="text-lg font-semibold text-on-surface">{{ t("home.albums.title") }}</h3>
           <p class="mt-0.5 text-xs text-on-surface-variant/50">{{ t("home.albums.subtitle") }}</p>
         </div>
-        <CoverList :items="newAlbums" :virtual="false" :gap="16" @click="openAlbum" />
+        <CoverList
+          :items="newAlbums"
+          :virtual="false"
+          :gap="16"
+          :add-action-label="roomActionLabel"
+          @add-to-together="addCardToRoom($event, 'album')"
+          @click="openAlbum"
+        />
       </section>
     </div>
   </div>

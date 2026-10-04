@@ -85,7 +85,8 @@ describe("original song menu room additions", () => {
     expect(menu.items.value.find((item) => item.key === "playNext")?.show).toBe(false);
     await menu.handleSelect("addToTogether");
     expect(mocks.add).toHaveBeenCalledWith("42");
-    expect(mocks.success).toHaveBeenCalledOnce();
+    // 结果提示由 store 统一处理，入口不重复弹提示。
+    expect(mocks.success).not.toHaveBeenCalled();
     wrapper.unmount();
   });
   it("rejects cloud and non-NetEase songs, and becomes unavailable after leaving", async () => {

@@ -9,6 +9,7 @@ import { useTrackMenu } from "@/composables/useTrackMenu";
 import { useMultiSelect } from "@/composables/useMultiSelect";
 import { useDownload } from "@/composables/useDownload";
 import { useFavorite } from "@/composables/useFavorite";
+import { useTogetherStore } from "@/stores/together";
 import { usePlaylistPicker } from "@/composables/usePlaylistPicker";
 import { useFloatingPlayerBar } from "@/composables/useFloatingPlayerBar";
 import { formatTime } from "@/utils/time";
@@ -85,6 +86,7 @@ const media = useMediaStore();
 const status = useStatusStore();
 const settings = useSettingsStore();
 const fav = useFavorite();
+const together = useTogetherStore();
 
 const { isFloatingBar: isFloatingPlayerBar, PLAYER_BAR_GAP } = useFloatingPlayerBar();
 
@@ -341,6 +343,24 @@ defineExpose({
         <template #header>
           <!-- 可选信息行 -->
           <slot name="topInfo" />
+          <div
+            v-if="
+              together.snapshot.mode === 'native' &&
+              together.snapshot.playbackOwned &&
+              !collectionId
+            "
+            class="flex justify-end px-3 pb-2"
+          >
+            <SButton
+              size="small"
+              variant="secondary"
+              :disabled="together.busy || loadingMore"
+              @click="together.addPlaylist(items)"
+            >
+              <template #icon><IconLucideListPlus /></template>
+              {{ t(hasMore ? "social.together.addLoadedSongs" : "social.together.addList") }}
+            </SButton>
+          </div>
           <!-- 补偿滚动条占据的边缘 -->
           <div class="pr-1.5">
             <!-- 批量模式 -->

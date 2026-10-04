@@ -5,9 +5,10 @@ import { useTogetherStore } from "@/stores/together";
 import { useTogetherDialog } from "@/composables/useTogetherDialog";
 import type { NoticeKind } from "@shared/types/social";
 import type { SVirtualListExposed } from "@/components/ui/SVirtualList.vue";
+import { createMessageTimeFormatter, startsMessageTimeGroup } from "@/utils/messageTime";
 
 defineOptions({ name: "Messages" });
-const { t } = useI18n();
+const { t, locale } = useI18n();
 const social = useSocialStore();
 const user = useUserStore();
 const together = useTogetherStore();
@@ -29,6 +30,8 @@ const listPositions: Record<"chat" | NoticeKind, number> = {
 const atBottom = ref(true);
 const hasNew = ref(false);
 let mounted = true;
+let lastMessageTop = 0;
+let historyAttempt = { peerId: "", before: 0, at: 0 };
 const notices = computed(() => social.snapshot.notices.filter((item) => item.kind === tab.value));
 const activeNotice = computed(() =>
   notices.value.find((item) => item.id === selectedNotices[tab.value as NoticeKind]),
@@ -66,11 +69,22 @@ const errorText = computed(() => {
   return code ? t(`social.errors.${code}`, t("social.errors.offline")) : "";
 });
 const draftLength = computed(() => Array.from(social.draft).length);
+const timeFormatter = computed(() => createMessageTimeFormatter(locale.value));
+const chatRows = computed(() => {
+  const now = Date.now();
+  return social.messages.map((message, index, messages) => ({
+    message,
+    timeLabel: timeFormatter.value(message.time, now),
+    timeGroup: startsMessageTimeGroup(message.time, messages[index - 1]?.time),
+  }));
+});
 
 async function toBottom(): Promise<void> {
+  const peerId = social.selected;
   await nextTick();
-  if (!mounted || tab.value !== "chat" || !list.value) return;
+  if (!mounted || tab.value !== "chat" || !list.value || social.selected !== peerId) return;
   list.value?.scrollToBottom();
+  lastMessageTop = list.value.scrollRef?.scrollTop ?? list.value.getScrollTop();
   atBottom.value = true;
   hasNew.value = false;
   if (document.visibilityState === "visible" && document.hasFocus())
@@ -80,7 +94,10 @@ async function toBottom(): Promise<void> {
 }
 function onScroll(event: Event): void {
   const element = event.target as HTMLElement;
-  atBottom.value = element.scrollHeight - element.scrollTop - element.clientHeight < 64;
+  const upwards = element.scrollTop < lastMessageTop;
+  lastMessageTop = element.scrollTop;
+  if (upwards && element.scrollTop < 96) void older();
+  atBottom.value = !upwards && element.scrollHeight - element.scrollTop - element.clientHeight < 64;
   if (atBottom.value && document.hasFocus()) {
     hasNew.value = false;
     void social.read(
@@ -93,11 +110,29 @@ async function select(peerId: string): Promise<void> {
     selectedNotices[tab.value as NoticeKind] = peerId;
     return;
   }
+  atBottom.value = true;
+  hasNew.value = false;
+  lastMessageTop = 0;
   await social.select(peerId);
-  await toBottom();
+  if (mounted && social.selected === peerId) await toBottom();
 }
 async function older(): Promise<void> {
+  if (tab.value !== "chat" || !social.historyMore[social.selected] || social.busy) return;
+  const before = social.messages.find((item) => !item.clientId)?.time || 0;
+  if (
+    historyAttempt.peerId === social.selected &&
+    historyAttempt.before === before &&
+    Date.now() - historyAttempt.at < 3000
+  )
+    return;
+  historyAttempt = { peerId: social.selected, before, at: Date.now() };
   await social.older();
+}
+function onHistoryIntent(direction: number): void {
+  if (direction >= 0) return;
+  atBottom.value = false;
+  const top = list.value?.scrollRef?.scrollTop ?? list.value?.getScrollTop() ?? 0;
+  if (top < 96) void older();
 }
 function keydown(event: KeyboardEvent): void {
   if (event.key === "Enter" && !event.shiftKey && !event.isComposing && event.keyCode !== 229) {
@@ -148,14 +183,15 @@ watch(
   () => social.messages.at(-1)?.id,
   (id, old) => {
     if (!id || id === old) return;
-    if (atBottom.value) void toBottom();
-    else hasNew.value = true;
+    // 贴底交给虚拟列表统一维护，避免页面与测量回调反复争抢滚动位置。
+    if (!atBottom.value) hasNew.value = true;
   },
 );
 watch(
   () => user.profile?.userId,
   async () => {
     social.stop();
+    historyAttempt = { peerId: "", before: 0, at: 0 };
     for (const key of Object.keys(listPositions) as ("chat" | NoticeKind)[]) listPositions[key] = 0;
     conversationList.value?.scrollTo(0);
     selectedNotices.notice = selectedNotices.mention = selectedNotices.comment = "";
@@ -221,7 +257,7 @@ onBeforeUnmount(() => {
         <aside
           class="conversation-pane relative w-64 max-w-2/5 shrink-0 flex flex-col min-h-0 border-0 border-r border-solid border-primary/12"
         >
-          <div class="message-tabs">
+          <div class="message-pane-header message-tabs">
             <STabs
               v-model="tab"
               :tabs="tabs"
@@ -236,7 +272,7 @@ onBeforeUnmount(() => {
             class="conversation-list flex-1 min-h-0"
             :items="rows"
             :item-height="76"
-            :padding-top="48"
+            :padding-top="16"
             item-fixed
             :get-item-key="(item) => `${tab}:${item.id}`"
           >
@@ -284,46 +320,44 @@ onBeforeUnmount(() => {
         </aside>
         <div class="detail-pane flex-1 min-w-0 min-h-0 flex flex-col">
           <template v-if="tab === 'chat' && social.selected">
-            <div
-              class="px-4 py-3 shrink-0 border-0 border-b border-solid border-primary/12 font-medium"
-            >
-              {{ peer?.name || social.selected }}
+            <div class="message-pane-header detail-header">
+              <div class="relative z-1 px-4 py-3 font-medium truncate">
+                {{ peer?.name || social.selected }}
+              </div>
             </div>
-            <SButton
-              v-if="social.historyMore[social.selected]"
-              variant="text"
-              size="small"
-              :loading="social.busy"
-              @click="older"
-            >
-              {{ t("social.older") }}
-            </SButton>
             <SVirtualList
               ref="list"
-              class="flex-1 min-h-0"
-              :items="social.messages"
-              :item-height="100"
-              :get-item-key="(item) => item.id"
+              :key="social.selected"
+              class="chat-message-list flex-1 min-h-0"
+              :items="chatRows"
+              :item-height="76"
+              :padding-top="16"
+              :get-item-key="(item) => item.message.id"
               preserve-anchor
               :follow-bottom="atBottom"
               @scroll="onScroll"
+              @scroll-intent="onHistoryIntent"
             >
               <template #default="{ item }">
                 <SocialMessageBubble
-                  :message="item"
-                  :own="item.senderId === social.snapshot.accountId"
+                  :message="item.message"
+                  :time-label="item.timeLabel"
+                  :time-group="item.timeGroup"
+                  :own="item.message.senderId === social.snapshot.accountId"
                   :avatar="
-                    item.senderId === social.snapshot.accountId
+                    item.message.senderId === social.snapshot.accountId
                       ? user.profile?.avatarUrl
                       : peer?.avatar
                   "
                   :name="
-                    item.senderId === social.snapshot.accountId
+                    item.message.senderId === social.snapshot.accountId
                       ? user.profile?.nickname
                       : peer?.name
                   "
                   :can-accept="!together.busy"
+                  :can-retry="!social.sending"
                   @accept="accept"
+                  @retry="social.retry"
                 />
               </template>
             </SVirtualList>
@@ -369,10 +403,10 @@ onBeforeUnmount(() => {
             </div>
           </template>
           <template v-else-if="tab !== 'chat' && activeNotice">
-            <div
-              class="px-4 py-3 shrink-0 border-0 border-b border-solid border-primary/12 font-medium"
-            >
-              {{ t(`social.tabs.${tab}`) }}
+            <div class="message-pane-header detail-header">
+              <div class="relative z-1 px-4 py-3 font-medium truncate">
+                {{ t(`social.tabs.${tab}`) }}
+              </div>
             </div>
             <div class="p-4 flex-1 min-h-0 overflow-auto">
               <div class="text-xs text-on-surface-variant mb-2">
@@ -407,16 +441,18 @@ onBeforeUnmount(() => {
   border-radius: 2px;
   background: rgb(var(--s-primary));
 }
-.message-tabs {
-  position: absolute;
-  inset: 0 0 auto;
+.message-pane-header {
+  position: relative;
   z-index: 2;
+  flex-shrink: 0;
+}
+.message-tabs {
   height: 48px;
   padding: 4px 8px 8px;
   pointer-events: none;
 }
-/* 只模糊有界的列表顶部；顶部留白由虚拟列表负责，滚动时条目经过遮罩下方。 */
-.message-tabs::before {
+/* 标题留在滚动容器外；共用遮罩仅覆盖内容顶部 16px，不让滚动条进入标题栏。 */
+.message-pane-header::before {
   content: "";
   position: absolute;
   inset: 0 0 -16px;

@@ -14,6 +14,7 @@ export const loadInvitePreview = async (
   if (!invite.invitation) throw new Error("invalid-input");
   if (!account.accountId || account.status === "auth-required") throw new Error("auth-required");
   const { inviterId, roomId } = invite.invitation;
+  if (inviterId === account.accountId) throw new Error("self-invitation");
   const cached = account.conversations.find((peer) => peer.peerId === inviterId);
   const preview: TogetherInvitePreview = {
     inviter: { id: inviterId, name: cached?.name || inviterId, avatar: cached?.avatar },

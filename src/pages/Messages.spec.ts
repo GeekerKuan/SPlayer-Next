@@ -90,7 +90,10 @@ const createWrapper = () =>
         SInput: stubInput,
         SVirtualList: stubList,
         SImg: true,
-        SocialMessageBubble: { props: ["message"], template: "<div>{{ message.text }}</div>" },
+        SocialMessageBubble: {
+          props: ["message", "timeGroup", "timeLabel"],
+          template: '<div><time v-if="timeGroup">{{ timeLabel }}</time>{{ message.text }}</div>',
+        },
       },
     },
   });
@@ -115,6 +118,7 @@ describe("messages page lifecycle and composition", () => {
       onUpdate: () => () => {},
       onNavigate: () => () => {},
       send: send as SocialApi["send"],
+      retry: vi.fn(),
       history: vi.fn(),
       notifications: async (kind) => ({
         ok: true,
@@ -215,6 +219,34 @@ describe("messages page lifecycle and composition", () => {
       await flushPromises();
       expect(currentList().getScrollTop()).toBe(positions[index]);
     }
+    wrapper.unmount();
+  });
+  it("loads older messages on upward scrolling without a top button or concurrent requests", async () => {
+    window.api.social.open = vi.fn(async () => ({
+      ok: true as const,
+      data: { items: state.messages["2"], more: true, cursor: 10 },
+    }));
+    let finish!: (value: unknown) => void;
+    const history = vi.fn(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    window.api.social.history = history as SocialApi["history"];
+    const wrapper = createWrapper();
+    await flushPromises();
+    await wrapper.find(".conversation-row").trigger("click");
+    await flushPromises();
+    expect(history).not.toHaveBeenCalled();
+    expect(wrapper.text()).not.toContain("加载更早消息");
+    wrapper.findAllComponents(stubList)[1].vm.$emit("scrollIntent", -100);
+    wrapper.findAllComponents(stubList)[1].vm.$emit("scrollIntent", -100);
+    expect(history).toHaveBeenCalledExactlyOnceWith("2", 10);
+    finish({ ok: true, data: { items: [], more: false, cursor: 10 } });
+    await flushPromises();
+    wrapper.findAllComponents(stubList)[1].vm.$emit("scrollIntent", -100);
+    expect(history).toHaveBeenCalledTimes(1);
     wrapper.unmount();
   });
 });

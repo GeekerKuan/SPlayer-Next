@@ -237,7 +237,6 @@ export const useTrackMenu = (
     }
     switch (key) {
       case "addToTogether": {
-        const roomId = together.snapshot.roomId;
         if (
           current.source !== "netease" ||
           current.cloud ||
@@ -245,10 +244,7 @@ export const useTrackMenu = (
           together.snapshot.mode !== "native"
         )
           return;
-        if (await together.add(current.id)) {
-          if (together.snapshot.roomId === roomId) toast.success(t("social.together.addedToRoom"));
-        } else if (together.error)
-          toast.error(t(`social.errors.${together.error}`, together.error));
+        await together.add(current.id);
         break;
       }
       case "play":

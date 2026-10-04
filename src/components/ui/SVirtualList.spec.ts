@@ -1,6 +1,6 @@
 import { mount, flushPromises } from "@vue/test-utils";
 import { describe, expect, it, vi } from "vitest";
-import { ref } from "vue";
+import { nextTick, ref } from "vue";
 import SVirtualList from "./SVirtualList.vue";
 
 vi.mock("@vueuse/core", () => ({
@@ -9,6 +9,57 @@ vi.mock("@vueuse/core", () => ({
 }));
 
 describe("chat virtual list anchoring", () => {
+  it("starts with the final screen and cancels queued bottom corrections on upward input", async () => {
+    const scroll = vi.spyOn(HTMLElement.prototype, "scrollTo").mockImplementation(function (
+      this: HTMLElement,
+      options: ScrollToOptions | number,
+    ) {
+      this.scrollTop = typeof options === "number" ? options : (options.top ?? 0);
+    });
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (
+      this: HTMLElement,
+    ) {
+      return {
+        height: this.dataset.index === undefined ? 200 : 50,
+        width: 300,
+        x: 0,
+        y: 0,
+        top: 0,
+        left: 0,
+        right: 300,
+        bottom: 50,
+        toJSON: () => ({}),
+      };
+    });
+    const wrapper = mount(SVirtualList, {
+      props: {
+        items: Array.from({ length: 100 }, (_, id) => ({ id })),
+        itemHeight: 50,
+        followBottom: true,
+        preserveAnchor: true,
+      },
+      slots: { default: "<span>{{ params.item.id }}</span>" },
+    });
+    await nextTick();
+    expect(wrapper.findAll("[data-index]")[0].attributes("data-index")).not.toBe("0");
+    await flushPromises();
+    const list = wrapper.vm as unknown as {
+      scrollTo: (top: number) => void;
+      scrollToBottom: () => void;
+      getScrollTop: () => number;
+    };
+    list.scrollTo(1000);
+    const before = scroll.mock.calls.length;
+    list.scrollToBottom();
+    await wrapper.find('[tabindex="0"]').trigger("wheel", { deltaY: -100 });
+    expect(wrapper.emitted("scrollIntent")?.at(-1)).toEqual([-100]);
+    await flushPromises();
+    expect(scroll.mock.calls.length).toBe(before);
+    await wrapper.setProps({ followBottom: false });
+    list.scrollTo(1000);
+    expect(list.getScrollTop()).toBe(1000);
+    wrapper.unmount();
+  });
   it("preserves a visible message across keyed prepends and keeps ordinary lists bounded", async () => {
     const scroll = vi.spyOn(HTMLElement.prototype, "scrollTo").mockImplementation(function (
       this: HTMLElement,

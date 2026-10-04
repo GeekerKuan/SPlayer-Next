@@ -1,3 +1,4 @@
+import { useUserStore } from "@/stores/user";
 import type { TogetherClipboardInvite } from "@shared/types/together";
 
 const open = ref(false);
@@ -33,6 +34,7 @@ export const useTogetherDialog = () => ({
     open.value = true;
   },
   showInvitation: (invite: TogetherClipboardInvite): void => {
+    if (invite.invitation?.inviterId === String(useUserStore().profile?.userId)) return;
     debug.value = false;
     fallbackLink.value = "";
     peerId.value = undefined;

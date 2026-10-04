@@ -11,6 +11,8 @@ export interface CoverCardProps {
   rounded?: string;
   /** 封面占位图 */
   fallback?: string;
+  /** 可选加入一起听入口，由父级提供来源语义。 */
+  addActionLabel?: string;
 }
 
 const props = withDefaults(defineProps<CoverCardProps>(), {
@@ -18,7 +20,7 @@ const props = withDefaults(defineProps<CoverCardProps>(), {
   rounded: "rounded-xl",
 });
 
-defineEmits<{ click: [] }>();
+defineEmits<{ click: []; addToTogether: [] }>();
 
 const coverRounded = computed(() => (props.type === "artist" ? "rounded-full" : props.rounded));
 const actualFallback = computed(() => (props.type === "artist" ? artistFallback : props.fallback));
@@ -32,6 +34,18 @@ const actualFallback = computed(() => (props.type === "artist" ? artistFallback 
   >
     <!-- 封面 -->
     <div class="relative overflow-hidden group-hover:will-change-transform" :class="coverRounded">
+      <SButton
+        v-if="addActionLabel"
+        size="small"
+        variant="secondary"
+        circle
+        class="absolute right-2 top-2 z-10 opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100"
+        :aria-label="addActionLabel"
+        :title="addActionLabel"
+        @click.stop="$emit('addToTogether')"
+      >
+        <template #icon><IconLucideListPlus /></template>
+      </SButton>
       <SImg
         :src="item.cover"
         :fallback="actualFallback"

@@ -5,6 +5,8 @@ import { usePopupZIndex } from "@/composables/useZIndex";
 export interface SSelectOption {
   value: string | number | boolean;
   label: string;
+  /** 下拉选项分组标题，未提供时保持原有平铺布局。 */
+  group?: string;
   /** 单条选项的内联样式 */
   style?: StyleValue;
 }
@@ -34,6 +36,17 @@ const { zIndex, onOpenChange } = usePopupZIndex();
 const selectedLabel = computed(
   () => props.options.find((o) => o.value === props.modelValue)?.label ?? props.placeholder,
 );
+
+const groups = computed(() => {
+  const result: { label: string; items: SSelectOption[] }[] = [];
+  for (const option of props.options) {
+    const label = option.group || "";
+    const last = result.at(-1);
+    if (last?.label === label) last.items.push(option);
+    else result.push({ label, items: [option] });
+  }
+  return result;
+});
 
 const handleChange = (val: string) => {
   const opt = props.options.find((o) => String(o.value) === val);
@@ -71,20 +84,25 @@ const handleChange = (val: string) => {
         class="max-h-60 w-[var(--reka-select-trigger-width)] overflow-hidden rounded-xl bg-surface-bright shadow-lg data-[state=open]:animate-select-in data-[state=closed]:animate-select-out"
       >
         <SelectViewport class="p-1">
-          <SelectItem
-            v-for="opt in options"
-            :key="String(opt.value)"
-            :value="String(opt.value)"
-            :title="opt.label"
-            :style="opt.style"
-            class="relative flex items-center h-8.5 px-3 pr-8 text-sm rounded-md cursor-pointer outline-none focus-visible:outline-none transition-[background-color,color] duration-200 data-[highlighted]:bg-on-surface/8"
-            :class="opt.value === modelValue ? 'text-primary' : 'text-on-surface'"
-          >
-            <SelectItemText class="truncate">{{ opt.label }}</SelectItemText>
-            <SelectItemIndicator class="absolute right-2">
-              <IconLucideCheck class="size-3.5 text-primary" />
-            </SelectItemIndicator>
-          </SelectItem>
+          <SelectGroup v-for="(group, index) in groups" :key="index">
+            <SelectLabel v-if="group.label" class="px-3 pt-2 pb-1 text-xs text-on-surface-variant">
+              {{ group.label }}
+            </SelectLabel>
+            <SelectItem
+              v-for="opt in group.items"
+              :key="String(opt.value)"
+              :value="String(opt.value)"
+              :title="opt.label"
+              :style="opt.style"
+              class="relative flex items-center h-8.5 px-3 pr-8 text-sm rounded-md cursor-pointer outline-none focus-visible:outline-none transition-[background-color,color] duration-200 data-[highlighted]:bg-on-surface/8"
+              :class="opt.value === modelValue ? 'text-primary' : 'text-on-surface'"
+            >
+              <SelectItemText class="truncate">{{ opt.label }}</SelectItemText>
+              <SelectItemIndicator class="absolute right-2">
+                <IconLucideCheck class="size-3.5 text-primary" />
+              </SelectItemIndicator>
+            </SelectItem>
+          </SelectGroup>
         </SelectViewport>
       </SelectContent>
     </SelectPortal>

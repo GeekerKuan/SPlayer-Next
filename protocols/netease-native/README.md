@@ -6,6 +6,8 @@
 
 | 能力                       | 签名路径                                      | 当前证据                                                                                 |
 | -------------------------- | --------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| 关注分页                   | /api/user/getfollows/{uid}                    | 原接口 offset/limit/order，独立 PC eapi 只读实测成功；非新 Windows 抓包证据              |
+| 粉丝分页                   | /api/user/getfolloweds/{uid}                  | 原接口 userId/time/limit/offset/getcounts，独立 PC eapi 只读实测成功；互关字段可用       |
 | 账号                       | /api/w/nuser/account/get                      | PC eapi 真实账号成功                                                                     |
 | 会话                       | /api/msg/private/users                        | PC eapi 拉取与未读样本成功                                                               |
 | 历史                       | /api/msg/private/history                      | time=-1 最新页；取历史有隐式已读副作用                                                   |
@@ -56,3 +58,5 @@ PC eapi 域名 `https://interfacepc.music.163.com`；签名 `/api/...`，HTTP `/
 协议示例和脱敏成功码见 [fixtures/iteration-2026-10-04.json](./fixtures/iteration-2026-10-04.json)。仅含合成 ID，不含账号、设备标识、Cookie 或真实房间链接。短链字段的开源参考见 [Music163Api-Go 接口定义](https://github.com/XiaoMengXinX/Music163Api-Go/blob/master/api/shortURL.go)，实际响应经本机重新验证。
 
 邀请预览额外复用原项目 `user_detail_new` 的 eapi 路径 `/api/w/v1/user/detail/{id}`（all=true、userId）；仅用于未知好友资料读取，失败保留 UID 占位，尚无本轮官方 PC 抓包样本。歌曲元数据复用已核验的 roomSongs，songId 不进入入房参数。预览只读、有界、可取消，不建立房间心跳。续播入口缓存与历史缓存分离，明确限流后冷却；原写入参数不变。详见 [生命周期与预览](../../docs/social/lifecycle-relay-invites.md)。
+
+本轮 ADD 确认、批量加入、末曲补歌、账号 HTTP 429 冷却、暂停/继续前端保护及好友分页的请求边界详见 [消息与诊断说明](../../docs/social/message-polish-and-diagnostics.md)。未变更加密算法及房间命令字段，读请求节奏与本地缓存属于本应用修复，不宣称是已抓获的完整原版行为。

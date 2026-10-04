@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { useTogetherStore } from "@/stores/together";
-import { useSocialStore } from "@/stores/social";
+import { useSettingsStore } from "@/stores/settings";
 import { useUserStore } from "@/stores/user";
 import { useTogetherDialog } from "@/composables/useTogetherDialog";
 import { useCopyText } from "@/composables/useCopyText";
@@ -10,8 +10,8 @@ import { useHistoryStore } from "@/stores/history";
 
 const props = defineProps<{ peerId?: string }>();
 const together = useTogetherStore();
-const social = useSocialStore();
 const user = useUserStore();
+const settings = useSettingsStore();
 const history = useHistoryStore();
 const roomDialog = useTogetherDialog();
 const { copy } = useCopyText();
@@ -19,6 +19,34 @@ const { t } = useI18n();
 const recipient = ref(props.peerId || "");
 const pushMode = ref("recommended");
 const state = computed(() => together.snapshot);
+const isHost = computed(
+  () =>
+    state.value.mode === "native" &&
+    state.value.creatorId === String(user.profile?.userId) &&
+    state.value.playbackOwned,
+);
+const isMember = computed(
+  () =>
+    state.value.mode === "native" &&
+    state.value.playbackOwned &&
+    !!state.value.creatorId &&
+    !isHost.value,
+);
+const sourceMode = computed({
+  get: () =>
+    isHost.value && !settings.system.player.togetherAutoRecommend ? "playlistOnly" : pushMode.value,
+  set: (value: string) => {
+    if (value !== "playlistOnly") pushMode.value = value;
+    if (isHost.value)
+      void settings.setSystem("player.togetherAutoRecommend", value !== "playlistOnly");
+  },
+});
+const sourceOptions = computed(() => [
+  { value: "recommended", label: t("social.together.recommendedMode") },
+  { value: "room", label: t("social.together.roomRecommendedMode") },
+  { value: "queue", label: t("social.together.queueMode") },
+  ...(isHost.value ? [{ value: "playlistOnly", label: t("social.together.playlistOnly") }] : []),
+]);
 const external = computed(
   () => !!state.value.roomId && state.value.mode === "native" && !state.value.playbackOwned,
 );
@@ -26,6 +54,7 @@ const canInvite = computed(
   () =>
     !!state.value.roomId &&
     !external.value &&
+    state.value.members.length < 2 &&
     ["waiting", "togetherOwner"].includes(state.value.status),
 );
 const currentSong = computed(() =>
@@ -34,32 +63,30 @@ const currentSong = computed(() =>
 const validRecipient = computed(
   () => /^[1-9]\d{0,19}$/.test(recipient.value) && recipient.value !== String(user.profile?.userId),
 );
-const peers = computed(() =>
-  social.snapshot.conversations
-    .filter((peer) => peer.peerId !== String(user.profile?.userId))
-    .slice(0, 30)
-    .map((peer) => ({ value: peer.peerId, label: peer.name || peer.peerId })),
-);
 const candidates = computed(() =>
-  pushMode.value === "recommended"
-    ? together.recommendations
-    : pushMode.value === "room"
-      ? (state.value.recommendations || []).filter(
+  sourceMode.value === "playlistOnly"
+    ? []
+    : pushMode.value === "recommended"
+      ? together.recommendations.filter(
           (song) => !state.value.songs.some((queued) => queued.id === song.id),
         )
-      : history.tracks
-          .filter(
-            (track) =>
-              track.source === "netease" &&
-              !track.cloud &&
-              !state.value.songs.some((song) => song.id === track.id),
+      : pushMode.value === "room"
+        ? (state.value.recommendations || []).filter(
+            (song) => !state.value.songs.some((queued) => queued.id === song.id),
           )
-          .slice(0, 100)
-          .map((track) => ({
-            id: track.id,
-            name: track.title,
-            artists: track.artists.map((artist) => artist.name).join(" / "),
-          })),
+        : history.tracks
+            .filter(
+              (track) =>
+                track.source === "netease" &&
+                !track.cloud &&
+                !state.value.songs.some((song) => song.id === track.id),
+            )
+            .slice(0, 100)
+            .map((track) => ({
+              id: track.id,
+              name: track.title,
+              artists: track.artists.map((artist) => artist.name).join(" / "),
+            })),
 );
 const errorText = computed(() =>
   together.error ? t(`social.errors.${together.error}`, t("social.errors.offline")) : "",
@@ -73,7 +100,7 @@ watchEffect(() => {
     state.value.connected &&
     state.value.roomId &&
     !external.value &&
-    pushMode.value === "recommended" &&
+    sourceMode.value === "recommended" &&
     !together.busy &&
     !together.recommendationsLoading &&
     !together.recommendations.length &&
@@ -146,12 +173,7 @@ async function openFallback(): Promise<void> {
           {{ t("social.together.inviteDescription") }}
         </p>
       </div>
-      <SSelect
-        v-if="peers.length"
-        v-model="recipient"
-        :options="peers"
-        :placeholder="t('social.together.chooseFriend')"
-      />
+      <TogetherFriendPicker v-model="recipient" :disabled="together.busy" />
       <SInput
         v-model="recipient"
         :placeholder="t('social.together.friendId')"
@@ -205,6 +227,9 @@ async function openFallback(): Promise<void> {
         <div class="flex items-center gap-2 text-sm">
           <span class="size-2 rounded-full" :class="state.connected ? 'bg-primary' : 'bg-error'" />
           {{ t(`social.together.status.${state.status}`) }}
+          <span v-if="isMember" class="text-xs text-on-surface-variant">
+            · {{ t("social.together.memberRole") }}
+          </span>
         </div>
         <div class="flex gap-3 mt-3 flex-wrap">
           <div
@@ -224,14 +249,8 @@ async function openFallback(): Promise<void> {
         </p>
       </div>
       <div v-if="canInvite" class="flex flex-col gap-2 shrink-0">
-        <div class="grid gap-2 min-w-0" :class="peers.length ? 'grid-cols-2' : 'grid-cols-1'">
-          <SSelect
-            v-if="peers.length"
-            v-model="recipient"
-            :options="peers"
-            class="min-w-0"
-            :placeholder="t('social.together.chooseFriend')"
-          />
+        <div class="grid grid-cols-2 gap-2 min-w-0">
+          <TogetherFriendPicker v-model="recipient" :disabled="together.busy" class="min-w-0" />
           <SInput
             v-model="recipient"
             :placeholder="t('social.together.friendId')"
@@ -263,17 +282,9 @@ async function openFallback(): Promise<void> {
         <span class="text-xs text-on-surface-variant shrink-0">
           {{ t("social.together.pushMode") }}
         </span>
-        <SSelect
-          v-model="pushMode"
-          :options="[
-            { value: 'recommended', label: t('social.together.recommendedMode') },
-            { value: 'room', label: t('social.together.roomRecommendedMode') },
-            { value: 'queue', label: t('social.together.queueMode') },
-          ]"
-          class="flex-1 min-w-0"
-        />
+        <SSelect v-model="sourceMode" :options="sourceOptions" class="flex-1 min-w-0" />
         <SButton
-          v-if="pushMode === 'recommended'"
+          v-if="sourceMode === 'recommended'"
           size="small"
           variant="ghost"
           class="shrink-0 whitespace-nowrap"
@@ -284,51 +295,89 @@ async function openFallback(): Promise<void> {
           {{ t("social.together.recommend") }}
         </SButton>
       </div>
-      <p
-        v-if="pushMode === 'room' && !candidates.length"
-        class="text-xs text-on-surface-variant shrink-0"
-      >
-        {{ t("social.together.noRoomRecommendations") }}
+      <p v-if="isMember" class="text-xs text-on-surface-variant shrink-0" role="status">
+        {{
+          t(
+            state.awaitingNext
+              ? "social.together.memberWaiting"
+              : "social.together.memberAddingHint",
+          )
+        }}
       </p>
-      <STabs
-        :model-value="'songs'"
-        :tabs="[{ key: 'songs', label: t('social.together.queue') + ' · ' + state.songs.length }]"
-        type="bar"
-        size="small"
-      />
-      <SVirtualList
-        :items="state.songs"
-        :item-height="48"
-        item-fixed
-        :get-item-key="(song) => song.id"
-        class="flex-1 min-h-20"
-      >
-        <template #default="{ item }">
-          <div class="h-12 px-1 flex flex-col justify-center min-w-0">
-            <span
-              class="text-sm truncate"
-              :class="item.id === state.songId ? 'text-primary font-medium' : ''"
-            >
-              {{ item.name }}
-            </span>
-            <span class="text-xs text-on-surface-variant truncate">{{ item.artists }}</span>
-          </div>
-        </template>
-      </SVirtualList>
-      <div
-        v-if="candidates.length"
-        class="shrink-0 max-h-28 overflow-auto border-0 border-t border-solid border-primary/12 pt-2"
-      >
-        <button
-          v-for="item in candidates"
-          :key="item.id"
-          class="w-full flex items-center gap-2 px-1 py-2 rounded-lg border-none bg-transparent text-on-surface text-left text-sm hover:bg-on-surface/5 disabled:opacity-50 cursor-pointer"
-          :disabled="together.busy"
-          @click="together.add(item.id)"
+      <div class="grid grid-cols-2 gap-3 flex-1 min-h-0">
+        <section class="flex flex-col min-h-0 min-w-0" :aria-label="t('social.together.queue')">
+          <h3 class="text-xs font-medium py-2 shrink-0 text-on-surface-variant">
+            {{ t("social.together.queue") }} · {{ state.songs.length }}
+          </h3>
+          <SVirtualList
+            :items="state.songs"
+            :item-height="52"
+            item-fixed
+            :get-item-key="(song) => song.id"
+            class="flex-1 min-h-20"
+          >
+            <template #default="{ item }">
+              <div
+                class="h-13 px-2 rounded-lg flex flex-col justify-center min-w-0"
+                :class="item.id === state.songId ? 'bg-primary/8' : ''"
+                :title="item.name"
+              >
+                <span
+                  class="text-sm truncate"
+                  :class="item.id === state.songId ? 'text-primary font-medium' : ''"
+                >
+                  {{ item.name }}
+                </span>
+                <span class="text-xs text-on-surface-variant truncate">{{ item.artists }}</span>
+              </div>
+            </template>
+          </SVirtualList>
+        </section>
+        <section
+          class="flex flex-col min-h-0 min-w-0"
+          :aria-label="t('social.together.availableSongs')"
         >
-          <span class="truncate flex-1">{{ item.name }}</span>
-          <IconLucidePlus class="size-4 text-primary shrink-0" />
-        </button>
+          <h3 class="text-xs font-medium py-2 shrink-0 text-on-surface-variant">
+            {{ t("social.together.availableSongs") }} · {{ candidates.length }}
+          </h3>
+          <SVirtualList
+            :key="sourceMode"
+            :items="candidates"
+            :item-height="52"
+            item-fixed
+            :get-item-key="(song) => song.id"
+            class="flex-1 min-h-20"
+          >
+            <template #default="{ item }">
+              <button
+                class="h-13 w-full flex items-center gap-2 px-2 rounded-lg border-none bg-transparent text-on-surface text-left hover:bg-on-surface/5 disabled:opacity-50 cursor-pointer"
+                :title="item.name"
+                :aria-label="t('social.together.add') + ' ' + item.name"
+                :disabled="together.busy"
+                @click="together.add(item.id)"
+              >
+                <span class="flex-1 min-w-0 flex flex-col">
+                  <span class="text-sm truncate">{{ item.name }}</span>
+                  <span class="text-xs text-on-surface-variant truncate">{{ item.artists }}</span>
+                </span>
+                <IconLucidePlus class="size-4 text-primary shrink-0" />
+              </button>
+            </template>
+            <template #empty>
+              <p class="text-xs text-on-surface-variant px-2 py-3">
+                {{
+                  t(
+                    sourceMode === "playlistOnly"
+                      ? "social.together.playlistOnlyHint"
+                      : sourceMode === "room"
+                        ? "social.together.noRoomRecommendations"
+                        : "social.together.noAvailableSongs",
+                  )
+                }}
+              </p>
+            </template>
+          </SVirtualList>
+        </section>
       </div>
       <SButton variant="secondary" :loading="together.busy" @click="together.leave()">
         {{ t("social.together.leave") }}

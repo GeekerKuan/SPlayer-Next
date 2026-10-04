@@ -3,6 +3,7 @@ import type {
   TogetherPlaybackEnd,
   TogetherSnapshot,
   TogetherSong,
+  TogetherFriendPage,
 } from "@shared/types/together";
 import type { SocialSnapshot } from "@shared/types/social";
 import type { NativeOperation, NativeTransport } from "./netease-native/transport";
@@ -19,6 +20,11 @@ import { emptyTogetherSnapshot } from "./togetherService";
 import { isTogetherShortLink } from "../../../../shared/utils/togetherLink";
 
 interface Options {
+  diagnostic?: (fields: {
+    acknowledged?: boolean;
+    confirmationAttempt?: number;
+    confirmed?: boolean;
+  }) => void;
   loadResume?: () => Promise<{ accountId: string; roomId: string; joinedAt: number } | null>;
   saveResume?: (
     value: { accountId: string; roomId: string; joinedAt: number } | null,
@@ -74,6 +80,10 @@ export class NativeTogetherService {
   private commandAt = 0;
   private commandProgress = 0;
   private pendingEnd: PendingEnd | null = null;
+  private tailAttempt: { roomId: string; songId: string; candidate?: string } | null = null;
+  private recommendationCache: { key: string; at: number; songs: TogetherSong[] } | null = null;
+  private recommendationJob: { key: string; promise: Promise<TogetherSong[]> } | null = null;
+  private friendPages = new Map<string, { at: number; promise: Promise<TogetherFriendPage> }>();
   constructor(private options: Options) {}
 
   snapshot(): TogetherSnapshot {
@@ -157,6 +167,10 @@ export class NativeTogetherService {
     this.commandAt = 0;
     this.pendingEnd = null;
     this.ordinaryQueue = false;
+    this.tailAttempt = null;
+    this.recommendationCache = null;
+    this.recommendationJob = null;
+    this.friendPages.clear();
     this.state = {
       ...emptyTogetherSnapshot(),
       mode: "native",
@@ -178,8 +192,7 @@ export class NativeTogetherService {
       });
       for (const song of decodeRoomSongs(body)) this.metadata.set(song.id, song);
     }
-    const keep = new Set([...this.state.songs.map((s) => s.id), ...unique]);
-    for (const key of this.metadata.keys()) if (!keep.has(key)) this.metadata.delete(key);
+    // 保留有限详情缓存，写前刷新不丢弃刚校验的待加歌曲，避免写后重复拉详情。
     while (this.metadata.size > 600) this.metadata.delete(this.metadata.keys().next().value!);
     return unique.map(
       (id) => this.metadata.get(id) || { id, name: id, artists: "", durationMs: 0 },
@@ -240,6 +253,11 @@ export class NativeTogetherService {
       this.commandProgress = command.progress;
     }
     const songId = newer && command ? command.targetSongId : changedRoom ? "" : this.state.songId;
+    if (
+      this.tailAttempt &&
+      (this.tailAttempt.roomId !== info.roomId || this.tailAttempt.songId !== songId)
+    )
+      this.tailAttempt = null;
     const playing =
       newer && command ? command.playStatus === "PLAY" : changedRoom ? false : this.state.playing;
     const progressMs = playing
@@ -257,6 +275,7 @@ export class NativeTogetherService {
             ? "togetherOwner"
             : "together",
       roomId: info.roomId,
+      creatorId: info.creatorId,
       members: info.roomUsers.map((u) => ({
         id: u.userId,
         name: u.nickname || u.userId,
@@ -293,6 +312,7 @@ export class NativeTogetherService {
           this.busy = true;
           try {
             await this.read();
+            await this.extendPlayingTail();
             await this.continueEnded();
             if (this.ownedRoom && Date.now() - this.lastHeartbeat >= 20000) await this.heartbeat();
             this.failures = 0;
@@ -371,6 +391,13 @@ export class NativeTogetherService {
   private async continueEnded(): Promise<void> {
     const end = this.pendingEnd;
     if (!end || end.sent || !this.canContinue(end)) return;
+    if (
+      !end.candidate &&
+      this.tailAttempt?.candidate &&
+      this.tailAttempt.roomId === end.roomId &&
+      this.tailAttempt.songId === end.songId
+    )
+      end.candidate = this.tailAttempt.candidate;
     try {
       if (
         !end.candidate &&
@@ -387,12 +414,7 @@ export class NativeTogetherService {
           let candidate: TogetherSong | undefined;
           let valid = false;
           try {
-            const notQueued = (song: TogetherSong): boolean =>
-              !this.state.songs.some((queued) => queued.id === song.id);
-            candidate = this.state.recommendations?.find(notQueued);
-            if (!candidate)
-              candidate = decodeRecommendations(await this.call("recommendations")).find(notQueued);
-            if (candidate && !this.metadata.has(candidate.id)) await this.songs([candidate.id]);
+            candidate = await this.tailRecommendation();
             valid = !!candidate && this.metadata.has(candidate.id);
           } catch (error) {
             if (
@@ -421,7 +443,6 @@ export class NativeTogetherService {
             end.candidate = candidate.id;
             if (!this.state.songs.some((song) => song.id === candidate.id)) {
               await this.addSong(candidate.id);
-              await this.read();
             }
           }
         }
@@ -443,6 +464,52 @@ export class NativeTogetherService {
       if (this.pendingEnd === end) end.failed = true;
       throw error;
     }
+  }
+  /** 末曲开始播放后由本机房主补一首；沿用原轮询，不增加周期请求或多房员抢写。 */
+  private async extendPlayingTail(): Promise<void> {
+    const { roomId, songId } = this.state;
+    const eligible = (): boolean =>
+      this.ownedRoom === roomId &&
+      this.creatorId === this.accountId &&
+      this.state.roomId === roomId &&
+      this.state.songId === songId &&
+      this.state.playing &&
+      !this.pendingEnd &&
+      this.options.autoRecommend() &&
+      this.ordinaryQueue &&
+      this.playMode !== "SINGLE_LOOP" &&
+      this.state.songs.length < 500 &&
+      (this.playMode === "RANDOM" && this.randomList.length
+        ? this.randomList
+        : this.state.songs.map((song) => song.id)
+      ).at(-1) === songId;
+    if (!eligible() || (this.tailAttempt?.roomId === roomId && this.tailAttempt.songId === songId))
+      return;
+    const attempt = { roomId, songId, candidate: undefined as string | undefined };
+    this.tailAttempt = attempt;
+    try {
+      const candidate = await this.tailRecommendation();
+      if (!candidate) return;
+      await this.read();
+      if (!eligible() || this.tailAttempt !== attempt) return;
+      // 在 await 写请求前记录，结束事件和未知响应不得再次提交同一首。
+      attempt.candidate = candidate.id;
+      if (!this.state.songs.some((song) => song.id === candidate.id))
+        await this.addSong(candidate.id);
+    } catch (error) {
+      const code = error instanceof Error ? error.message : "offline";
+      if (/cancelled|account-|auth-required|room-changed|room-expired/.test(code)) throw error;
+      this.state = { ...this.state, error: code };
+    }
+  }
+  /** 房间候选耗尽后读取短时缓存的个人推荐，先验证详情，不替换整队列。 */
+  private async tailRecommendation(): Promise<TogetherSong | undefined> {
+    const queued = new Set(this.state.songs.map((song) => song.id));
+    const notQueued = (song: TogetherSong): boolean => !queued.has(song.id);
+    let candidate = this.state.recommendations?.find(notQueued);
+    if (!candidate) candidate = (await this.personalRecommendations()).find(notQueued);
+    if (candidate && !this.metadata.has(candidate.id)) await this.songs([candidate.id]);
+    return candidate && this.metadata.has(candidate.id) ? candidate : undefined;
   }
   private async heartbeat(adoptingRoom?: string): Promise<void> {
     if (adoptingRoom) {
@@ -484,7 +551,10 @@ export class NativeTogetherService {
     });
     if (epoch !== this.epoch) throw new Error("cancelled");
   }
-  private async mutation(operation: () => Promise<void>): Promise<TogetherSnapshot> {
+  private async mutation(
+    operation: () => Promise<void>,
+    readAfter = true,
+  ): Promise<TogetherSnapshot> {
     const waitingEpoch = this.epoch;
     if (this.pollFinished) await this.pollFinished;
     if (waitingEpoch !== this.epoch) throw new Error("cancelled");
@@ -495,7 +565,7 @@ export class NativeTogetherService {
     try {
       await operation();
       if (epoch !== this.epoch) throw new Error("cancelled");
-      await this.read();
+      if (readAfter) await this.read();
       if (epoch !== this.epoch) throw new Error("cancelled");
       this.active = true;
       this.schedule();
@@ -601,13 +671,58 @@ export class NativeTogetherService {
         if (input.action === "next") return;
         if (input.action === "seek") throw new Error("cancelled");
       }
+      const cachedOrder =
+        this.playMode === "RANDOM" && this.randomList.length
+          ? this.randomList
+          : this.state.songs.map((song) => song.id);
+      if (
+        input.action === "next" &&
+        this.options.autoRecommend() &&
+        this.ordinaryQueue &&
+        this.playMode !== "SINGLE_LOOP" &&
+        cachedOrder.at(-1) === this.state.songId
+      ) {
+        this.requireOwned();
+        const roomId = this.ownedRoom;
+        await this.read();
+        this.requireOwned();
+        if (this.ownedRoom !== roomId) throw new Error("room-changed");
+        const order =
+          this.playMode === "RANDOM" && this.randomList.length
+            ? this.randomList
+            : this.state.songs.map((song) => song.id);
+        if (
+          order.at(-1) === this.state.songId &&
+          this.options.autoRecommend() &&
+          this.ordinaryQueue &&
+          this.playMode !== "SINGLE_LOOP"
+        ) {
+          const tail = this.tailAttempt;
+          const candidate =
+            tail?.candidate && tail.roomId === this.ownedRoom && tail.songId === this.state.songId
+              ? tail.candidate
+              : (await this.tailRecommendation())?.id;
+          if (!candidate) throw new Error("no-room-song");
+          if (!this.state.songs.some((song) => song.id === candidate)) {
+            if (tail?.candidate === candidate) throw new Error("room-add-unconfirmed");
+            this.tailAttempt = { roomId: this.ownedRoom, songId: this.state.songId, candidate };
+            await this.addSong(candidate);
+          }
+          await this.command(input);
+          return;
+        }
+      }
       await this.command(input);
     });
   }
-  private async addSong(songId: string): Promise<void> {
+  private async addSong(input: string | string[]): Promise<void> {
     this.requireOwned();
-    if (this.state.songs.some((s) => s.id === songId)) throw new Error("already-in-queue");
-    if (this.state.songs.length >= 500) throw new Error("queue-full");
+    const songIds = Array.isArray(input) ? input : [input];
+    const roomId = this.ownedRoom;
+    const epoch = this.epoch;
+    if (songIds.some((id) => this.state.songs.some((s) => s.id === id)))
+      throw new Error("already-in-queue");
+    if (this.state.songs.length + songIds.length > 500) throw new Error("queue-full");
     const versions = this.versions.map((v) => ({
       ...v,
       version: String(v.userId) === this.accountId ? v.version + 1 : v.version,
@@ -615,8 +730,8 @@ export class NativeTogetherService {
     // Windows 透传已有 version，仅在缺少本机项时用数字 UID 建立新项。
     if (!versions.some((v) => String(v.userId) === this.accountId))
       versions.push({ userId: Number(this.accountId), version: 1 });
-    requireRoomResult(
-      await this.call("roomAdd", {
+    try {
+      const result = await this.call("roomAdd", {
         roomId: this.ownedRoom,
         playlistParam: JSON.stringify({
           commandType: "ADD",
@@ -624,32 +739,141 @@ export class NativeTogetherService {
           playMode: this.playMode,
           anchorSongId: this.state.songId,
           anchorPosition: this.state.songs.findIndex((s) => s.id === this.state.songId),
-          randomList: [songId],
-          displayList: [songId],
+          randomList: songIds,
+          displayList: songIds,
         }),
-      }),
-    );
+      });
+      const ack = (result.data as { result?: unknown } | undefined)?.result;
+      this.options.diagnostic?.({ acknowledged: typeof ack === "boolean" ? ack : undefined });
+      requireRoomResult(result);
+    } catch (error) {
+      const code = error instanceof Error ? error.message : "offline";
+      if (!["operation-unknown", "room-operation-failed"].includes(code)) throw error;
+      // 否定/未知响应不能重放 ADD；以随后读到的同一房间列表确认实际结果。
+    }
+    for (const [attempt, wait] of [0, 300, 900].entries()) {
+      if (wait) {
+        const signal = this.controller.signal;
+        await new Promise<void>((resolve, reject) => {
+          signal.throwIfAborted();
+          const timer = setTimeout(() => {
+            signal.removeEventListener("abort", cancel);
+            resolve();
+          }, wait);
+          const cancel = (): void => {
+            clearTimeout(timer);
+            signal.removeEventListener("abort", cancel);
+            reject(new Error("cancelled"));
+          };
+          signal.addEventListener("abort", cancel, { once: true });
+        });
+      }
+      if (epoch !== this.epoch) throw new Error("cancelled");
+      await this.read();
+      this.requireOwned();
+      if (this.ownedRoom !== roomId) throw new Error("room-changed");
+      const queued = new Set(this.state.songs.map((song) => song.id));
+      const confirmed = songIds.every((id) => queued.has(id));
+      this.options.diagnostic?.({ confirmationAttempt: attempt + 1, confirmed });
+      if (confirmed) return;
+    }
+    throw new Error("room-add-unconfirmed");
   }
   add(songId: string): Promise<TogetherSnapshot> {
-    if (!/^[1-9]\d{0,19}$/.test(songId)) throw new Error("invalid-song");
+    return this.addMany([songId]);
+  }
+  /** 一次增量加入整份歌单；不逐曲提交，不截断容量超限的歌单。 */
+  addMany(input: string[]): Promise<TogetherSnapshot> {
+    if (!input.length || input.length > 500 || input.some((id) => !/^[1-9]\d{0,19}$/.test(id)))
+      throw new Error("invalid-song");
+    const ids = [...new Set(input)];
     return this.mutation(async () => {
       this.requireOwned();
-      if (!this.metadata.has(songId)) await this.songs([songId]);
-      if (!this.metadata.has(songId)) throw new Error("invalid-song");
-      if (this.state.songs.some((song) => song.id === songId)) return;
-      await this.addSong(songId);
-    }).then((next) => {
-      if (!next.songs.some((song) => song.id === songId)) throw new Error("room-operation-failed");
-      return next;
-    });
+      const roomId = this.ownedRoom;
+      const knownQueue = new Set(this.state.songs.map((song) => song.id));
+      const candidates = ids.filter((id) => !knownQueue.has(id));
+      if (!candidates.length) return;
+      await this.songs(candidates);
+      if (candidates.some((id) => !this.metadata.has(id))) throw new Error("invalid-song");
+      // 其他成员可能已改列表；发送前刷新版本向量，不用上一次轮询的旧 version。
+      await this.read();
+      this.requireOwned();
+      if (this.ownedRoom !== roomId) throw new Error("room-changed");
+      const queued = new Set(this.state.songs.map((song) => song.id));
+      const missing = candidates.filter((id) => !queued.has(id));
+      if (missing.length) await this.addSong(missing);
+      // ADD 已读回确认，避免 mutation 再完整读取一次房间。
+    }, false);
   }
   async recommendations(): Promise<TogetherSong[]> {
     await this.account();
     if (this.state.recommendations?.length) {
       return structuredClone(this.state.recommendations);
     }
-    const songs = decodeRecommendations(await this.call("recommendations"));
-    return songs;
+    return this.personalRecommendations();
+  }
+  /** 好友分页只在邀请选择器主动请求时读取；缓存/单飞共享，最多十页，不后台遍历。 */
+  async friends(kind: "following" | "followers", offset: number): Promise<TogetherFriendPage> {
+    if (!Number.isInteger(offset) || offset < 0 || offset > 400 || offset % 100)
+      throw new Error("invalid-input");
+    await this.account();
+    const key = `${this.accountId}:${kind}:${offset}`;
+    const cached = this.friendPages.get(key);
+    if (cached && Date.now() - cached.at < 60000) return structuredClone(await cached.promise);
+    const promise = this.call(
+      kind === "following" ? "userFollows" : "userFollowers",
+      kind === "following"
+        ? { userId: this.accountId, offset, limit: 100, order: true }
+        : { userId: this.accountId, offset, limit: 100, time: "0", getcounts: "true" },
+    ).then((body) => {
+      const raw = kind === "following" ? body.follow : body.followeds;
+      if (!Array.isArray(raw)) throw new Error("invalid-response");
+      const items: TogetherFriendPage["items"] = [];
+      for (const value of raw.slice(0, 100)) {
+        if (!value || typeof value !== "object") continue;
+        const friend = value as Record<string, unknown>;
+        const id = String(friend.userId);
+        if (!/^[1-9]\d{0,19}$/.test(id) || id === this.accountId) continue;
+        items.push({
+          id,
+          name: typeof friend.nickname === "string" ? friend.nickname.slice(0, 100) : id,
+          mutual: friend.mutual === true,
+        });
+      }
+      return { items, more: body.more === true && raw.length > 0 && offset < 400 };
+    });
+    this.friendPages.set(key, { at: Date.now(), promise });
+    while (this.friendPages.size > 10)
+      this.friendPages.delete(this.friendPages.keys().next().value!);
+    try {
+      return structuredClone(await promise);
+    } catch (error) {
+      this.friendPages.delete(key);
+      throw error;
+    }
+  }
+  /** 个人推荐兜底与房间候选分开，候选全部已入队时仍能读取个人推荐。 */
+  private async personalRecommendations(): Promise<TogetherSong[]> {
+    await this.account();
+    const key = `${this.accountId}:${this.state.roomId}`;
+    if (this.recommendationCache?.key === key && Date.now() - this.recommendationCache.at < 60000)
+      return structuredClone(this.recommendationCache.songs);
+    if (this.recommendationJob?.key === key)
+      return structuredClone(await this.recommendationJob.promise);
+    const epoch = this.epoch;
+    const promise = this.call("recommendations").then((raw) => {
+      if (epoch !== this.epoch || key !== `${this.accountId}:${this.state.roomId}`)
+        throw new Error("cancelled");
+      const songs = decodeRecommendations(raw);
+      this.recommendationCache = { key, at: Date.now(), songs };
+      return songs;
+    });
+    this.recommendationJob = { key, promise };
+    try {
+      return structuredClone(await promise);
+    } finally {
+      if (this.recommendationJob?.promise === promise) this.recommendationJob = null;
+    }
   }
   async accept(peerId: string, messageId: string): Promise<TogetherSnapshot> {
     const snapshot = await this.options.account();
@@ -705,7 +929,6 @@ export class NativeTogetherService {
     if (!candidate) throw new Error("no-room-song");
     if (!this.state.songs.some((song) => song.id === candidate)) {
       await this.addSong(candidate);
-      await this.read();
     }
     if (this.state.roomId !== info.roomId || this.creatorId !== this.accountId)
       throw new Error("room-changed");

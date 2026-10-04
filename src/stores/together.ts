@@ -7,7 +7,14 @@ import {
   discardPreparedTogetherPlayback,
 } from "@/services/togetherPlayback";
 import { TogetherControls } from "@/services/togetherControl";
-import { clearTogetherSession, setTogetherControlHandler } from "@/services/togetherSession";
+import {
+  clearTogetherSession,
+  setTogetherControlHandler,
+  setTogetherAddHandler,
+} from "@/services/togetherSession";
+import { getCurrentTime } from "@/services/playback";
+import { toast, type ToastInstance } from "@/composables/useToast";
+import i18n from "@/i18n";
 
 export const useTogetherStore = defineStore("together", () => {
   const snapshot = shallowRef<TogetherSnapshot>({
@@ -28,6 +35,7 @@ export const useTogetherStore = defineStore("together", () => {
   const error = ref("");
   let unsubscribe: (() => void) | null = null;
   let epoch = 0;
+  let additionToast: ToastInstance | null = null;
   const recommendations = computed(() =>
     (snapshot.value.recommendations?.length
       ? snapshot.value.recommendations
@@ -57,11 +65,13 @@ export const useTogetherStore = defineStore("together", () => {
       },
       send: (input) => window.api.together.control(input),
       refresh: () => window.api.together.connect(),
+      position: getCurrentTime,
     });
   let controls = makeControls();
   function start(): void {
     if (unsubscribe) return;
     setTogetherControlHandler(controlRequest);
+    setTogetherAddHandler(addPlaylist);
     unsubscribe =
       window.api.together?.onUpdate((next) => {
         error.value = next.error || "";
@@ -74,6 +84,8 @@ export const useTogetherStore = defineStore("together", () => {
     unsubscribe?.();
     unsubscribe = null;
     controls.dispose();
+    additionToast?.close();
+    additionToast = null;
     controls = makeControls();
     clearTogetherSession();
     disposeTogetherPlayback();
@@ -159,7 +171,58 @@ export const useTogetherStore = defineStore("together", () => {
   }
   const control = async (input: TogetherControl): Promise<boolean> =>
     (await controlRequest(input)).ok;
-  const add = (songId: string): Promise<boolean> => run(() => window.api.together.add(songId));
+  /** 加歌提示共用一次操作生命周期；迟到响应不能给新房间弹成功提示。 */
+  const runAddition = async (
+    operation: () => Promise<SocialResult<TogetherSnapshot>>,
+  ): Promise<boolean> => {
+    if (busy.value) return false;
+    const current = epoch,
+      roomId = snapshot.value.roomId;
+    const notice = toast.loading(i18n.global.t("social.together.adding"), { duration: 0 });
+    additionToast = notice;
+    try {
+      const success = await run(operation);
+      if (current === epoch && roomId === snapshot.value.roomId) {
+        if (success) toast.success(i18n.global.t("social.together.addedToRoom"));
+        else if (error.value)
+          toast.error(i18n.global.t(`social.errors.${error.value}`, error.value));
+      }
+      return success;
+    } finally {
+      notice.close();
+      if (additionToast === notice) additionToast = null;
+    }
+  };
+  const add = (songId: string): Promise<boolean> =>
+    runAddition(() => window.api.together.add(songId));
+  /** 复用已有歌单数据，一次 IPC / ADD；失败不自动逐曲补发。 */
+  const addPlaylist = async (
+    tracks: readonly import("@shared/types/player").Track[],
+  ): Promise<boolean> => {
+    if (busy.value || snapshot.value.mode !== "native" || !snapshot.value.playbackOwned)
+      return false;
+    const queued = new Set(snapshot.value.songs.map((song) => song.id));
+    const ids = [
+      ...new Set(
+        tracks
+          .filter((track) => track.source === "netease" && !track.cloud)
+          .map((track) => track.id),
+      ),
+    ].filter((id) => !queued.has(id));
+    if (!ids.length) {
+      error.value = tracks.some((track) => track.source === "netease" && !track.cloud)
+        ? "no-new-room-songs"
+        : "room-songs-only";
+      toast.info(i18n.global.t(`social.errors.${error.value}`));
+      return false;
+    }
+    if (ids.length + queued.size > 500) {
+      error.value = "queue-full";
+      toast.warning(i18n.global.t("social.errors.queue-full"));
+      return false;
+    }
+    return runAddition(() => window.api.together.addMany(ids));
+  };
   async function loadRecommendations(): Promise<void> {
     if (busy.value || recommendationsLoading.value) return;
     const current = epoch;
@@ -182,6 +245,8 @@ export const useTogetherStore = defineStore("together", () => {
     unsubscribe?.();
     unsubscribe = null;
     controls.dispose();
+    additionToast?.close();
+    additionToast = null;
     clearTogetherSession();
     disposeTogetherPlayback();
     candidates.value = [];
@@ -211,6 +276,7 @@ export const useTogetherStore = defineStore("together", () => {
     leave,
     control,
     add,
+    addPlaylist,
     loadRecommendations,
   };
 });

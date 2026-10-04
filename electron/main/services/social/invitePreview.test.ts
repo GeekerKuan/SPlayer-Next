@@ -108,3 +108,22 @@ test("authentication failures are not hidden as missing invitation metadata", as
     /auth-required/,
   );
 });
+
+test("own invitation never fetches preview metadata", async () => {
+  let requests = 0;
+  await assert.rejects(
+    loadInvitePreview(
+      { ...invite, invitation: { roomId: "own-room", inviterId: "1" } },
+      account,
+      {
+        call: async () => {
+          requests++;
+          return {};
+        },
+      },
+      new AbortController().signal,
+    ),
+    /self-invitation/,
+  );
+  assert.equal(requests, 0);
+});

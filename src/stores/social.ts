@@ -42,6 +42,10 @@ export const useSocialStore = defineStore("social", () => {
 
   const apply = (next: SocialSnapshot): void => {
     if (next.accountId !== snapshot.value.accountId) {
+      epoch++;
+      busy.value = false;
+      sending.value = false;
+      error.value = "";
       readJob = null;
       selected.value = "";
       for (const map of [drafts, historyMore, noticeMore, noticeCursors])
@@ -185,6 +189,28 @@ export const useSocialStore = defineStore("social", () => {
       if (current === epoch) sending.value = false;
     }
   }
+  async function retry(messageId: string): Promise<void> {
+    if (sending.value) return;
+    const message = messages.value.find((item) => item.id === messageId);
+    if (!message || message.delivery !== "failed" || message.senderId !== snapshot.value.accountId)
+      return;
+    const current = epoch;
+    sending.value = true;
+    error.value = "";
+    try {
+      const response = await window.api.social.retry(messageId);
+      if (current !== epoch) return;
+      const result = unwrap(response);
+      if (result.delivery === "sent" && drafts[message.peerId]?.trim() === message.text)
+        drafts[message.peerId] = "";
+      if (result.delivery === "unknown") error.value = "send-unknown";
+      if (result.delivery === "failed") error.value = "send-failed";
+    } catch {
+      /* 保留失败消息和草稿，不自动循环重试。 */
+    } finally {
+      if (current === epoch) sending.value = false;
+    }
+  }
   async function read(time: number): Promise<void> {
     if (!selected.value || time === 0 || (snapshot.value.readTimes[selected.value] ?? 0) >= time)
       return;
@@ -237,6 +263,7 @@ export const useSocialStore = defineStore("social", () => {
     moreConversations,
     loadNotices,
     send,
+    retry,
     read,
     dismissInvite,
   };

@@ -22,6 +22,41 @@ const snapshot: TogetherSnapshot = {
   updatedAt: 0,
 };
 describe("together state lifecycle", () => {
+  it("adds only new NetEase tracks in one request and rejects overflow before IPC", async () => {
+    const store = useTogetherStore();
+    store.snapshot = { ...snapshot, mode: "native", playbackOwned: true };
+    window.api.together.addMany = vi.fn().mockResolvedValue({ ok: true, data: store.snapshot });
+    const track = (
+      id: string,
+      source: import("@shared/types/player").TrackSource = "netease",
+      cloud = false,
+    ): import("@shared/types/player").Track => ({
+      id,
+      source,
+      cloud,
+      title: "song",
+      artists: [],
+      duration: 30000,
+    });
+    expect(
+      await store.addPlaylist([
+        track("1"),
+        track("2"),
+        track("2"),
+        track("3", "local"),
+        track("4", "netease", true),
+      ]),
+    ).toBe(true);
+    expect(window.api.together.addMany).toHaveBeenCalledExactlyOnceWith(["2"]);
+    expect(await store.addPlaylist([track("1")])).toBe(false);
+    expect(store.error).toBe("no-new-room-songs");
+    expect(
+      await store.addPlaylist(Array.from({ length: 500 }, (_, i) => track(String(i + 10)))),
+    ).toBe(false);
+    expect(store.error).toBe("queue-full");
+    expect(window.api.together.addMany).toHaveBeenCalledOnce();
+    store.dispose();
+  });
   let update: (value: TogetherSnapshot) => void;
   const unsubscribe = vi.fn();
   const stop = vi.fn();

@@ -244,6 +244,29 @@ describe("native room playback bridge", () => {
     await flushPromises();
     expect(f.seek).toHaveBeenCalledExactlyOnceWith(30000);
   });
+  it.each([false, true])(
+    "local play-state acknowledgement playing=%s does not reset nearby progress",
+    async (playing) => {
+      const room = snapshot("play-state");
+      applyTogetherPlayback(room);
+      await flushPromises();
+      f.currentTime = 31000;
+      f.status.isPlaying = !playing;
+      f.seek.mockClear();
+      f.play.mockClear();
+      f.pause.mockClear();
+      applyTogetherPlayback(
+        { ...room, playing, progressMs: 31200, playbackRevision: 2, commandSeq: 11 },
+        undefined,
+        false,
+        true,
+      );
+      await flushPromises();
+      expect(f.seek).not.toHaveBeenCalled();
+      expect(playing ? f.play : f.pause).toHaveBeenCalledOnce();
+      expect(f.control).not.toHaveBeenCalled();
+    },
+  );
   it("does not repeat a local engine seek when the server acknowledgement arrives during its completion", async () => {
     const room = snapshot("room-g");
     applyTogetherPlayback(room);

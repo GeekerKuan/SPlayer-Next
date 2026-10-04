@@ -9,7 +9,6 @@ import { useSettingsStore } from "@/stores/settings";
 import { useStatusStore } from "@/stores/status";
 import { useStreamingStore } from "@/stores/streaming";
 import { usePluginsStore } from "@/stores/plugins";
-import { useHistoryStore } from "@/stores/history";
 import { useLibraryStore } from "@/stores/library";
 import * as queue from "@/stores/queue";
 import * as fm from "./fm";
@@ -43,6 +42,7 @@ import {
   ownsTogetherPlayback,
   controlTogetherPlayback,
   playTogetherTrack,
+  addTogetherTracks,
 } from "@/services/togetherSession";
 
 /** 加载运行时选项 */
@@ -407,8 +407,7 @@ const loadTrack = async (
         handleError(result.error);
         shouldSkip = true;
       } else if (result.ok) {
-        // 用户主动触发的成功播放记入历史；initPlayer 的恢复路径走 load() 不经此处
-        void useHistoryStore().record(track);
+        // 历史统一在原统计会话首次实际播放时记录，覆盖一起听与恢复播放路径。
         if (resolved.cacheRequest) {
           cacheScheduler.schedule(track.id, resolved.cacheRequest);
         }
@@ -1243,7 +1242,7 @@ export const insertToQueue = (
   context?: PlaybackContext,
 ): number => {
   if (ownsTogetherPlayback()) {
-    toast.error(i18n.global.t("social.together.useRoomAdd"));
+    void addTogetherTracks([item]);
     return -1;
   }
   const status = useStatusStore();
@@ -1280,7 +1279,7 @@ export const insertManyToQueue = (
 ): number => {
   if (items.length === 0) return 0;
   if (ownsTogetherPlayback()) {
-    toast.error(i18n.global.t("social.together.useRoomAdd"));
+    void addTogetherTracks(items);
     return 0;
   }
   const status = useStatusStore();

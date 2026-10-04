@@ -5,6 +5,7 @@ import { useStatusStore } from "@/stores/status";
 import { fetchHeartModeList } from "@/apis/recommend/netease";
 import { toast } from "@/composables/useToast";
 import * as player from "@/core/player";
+import { ownsTogetherPlayback } from "@/services/togetherSession";
 
 /**
  * 心动模式
@@ -23,6 +24,10 @@ export const useHeartMode = () => {
    * @param seed - 指定种子歌曲；缺省时取当前播放的网易云歌曲，再退而取随机红心歌曲 id
    */
   const enterHeartMode = async (seed?: Track): Promise<void> => {
+    if (ownsTogetherPlayback()) {
+      toast.info(t("social.together.unsupportedMode"));
+      return;
+    }
     if (status.heartMode) {
       toast.info(t("player.heartMode.already"));
       return;

@@ -54,6 +54,8 @@ const props = withDefaults(defineProps<SVirtualListProps<T>>(), {
 const emit = defineEmits<{
   scroll: [event: Event];
   reachBottom: [];
+  /** 用户主动滚动的方向，负值表示向上；先于浏览器改变位置通知调用方。 */
+  scrollIntent: [direction: number];
 }>();
 
 const wrapperRef = ref<HTMLElement | null>(null);
@@ -78,6 +80,7 @@ const itemTops = shallowRef<number[]>([]);
 let itemKeys: (string | number)[] = [];
 let disposed = false;
 let measureTimer: ReturnType<typeof setTimeout> | undefined;
+let bottomRevision = 0;
 
 const anchor = (): { key: string | number; offset: number } | undefined => {
   if (!props.preserveAnchor || props.followBottom) return undefined;
@@ -95,7 +98,15 @@ const restoreAnchor = (saved: ReturnType<typeof anchor>): void => {
     scrollToBottom();
   } else if (saved) {
     const index = itemKeys.indexOf(saved.key);
-    if (index >= 0) scrollToPosition(getItemTop(index) + saved.offset);
+    if (index >= 0) {
+      const top = getItemTop(index) + saved.offset;
+      const current = ++bottomRevision;
+      scrollTop.value = Math.max(0, top);
+      calculateVisibleRange(scrollTop.value);
+      nextTick(() => {
+        if (!disposed && current === bottomRevision) scrollToPosition(top);
+      });
+    }
   }
 };
 
@@ -195,6 +206,7 @@ const calculateVisibleRange = (currentScrollTop: number): void => {
 };
 
 const visibleItems = computed(() => {
+  if (props.followBottom && !viewportHeight.value) return [];
   if (actualStartIndex.value > actualEndIndex.value) return [];
   return props.items.slice(actualStartIndex.value, actualEndIndex.value + 1);
 });
@@ -258,6 +270,16 @@ const handleScroll = (event: Event): void => {
   }
 };
 
+/** 用户向上阅读时取消尚未执行的贴底纠正，避免测量和输入争抢位置。 */
+const handleScrollIntent = (direction: number): void => {
+  if (direction < 0) bottomRevision++;
+  emit("scrollIntent", direction);
+};
+const handleScrollKey = (event: KeyboardEvent): void => {
+  if (event.target !== scrollRef.value) return;
+  if (["ArrowUp", "PageUp", "Home"].includes(event.key)) handleScrollIntent(-1);
+};
+
 /** 获取指定索引项的顶部偏移（含 paddingTop） */
 const getItemTop = (index: number): number => {
   if (props.itemFixed) return index * props.itemHeight + props.paddingTop;
@@ -302,16 +324,21 @@ const getDropInfoByOffset = (offsetY: number): { index: number; position: "top" 
 /** 滚动到指定像素位置 */
 const scrollToPosition = (top: number, behavior: ScrollBehavior = "auto"): void => {
   if (disposed) return;
+  bottomRevision++;
   scrollTop.value = Math.max(0, top);
   calculateVisibleRange(scrollTop.value);
-  scrollRef.value?.scrollTo({ top, behavior });
+  const element = scrollRef.value;
+  if (element && Math.abs(element.scrollTop - scrollTop.value) > 0.5)
+    element.scrollTo({ top: scrollTop.value, behavior });
 };
 
-/** 先定位最后一屏，再在本轮 DOM 测量后纠正到真实底部。 */
+/** 先渲染最后一屏，DOM 更新后一次性贴底；多次测量只保留最后的纠正。 */
 const scrollToBottom = (): void => {
-  scrollToPosition(Math.max(0, totalHeight.value + props.paddingBottom - viewportHeight.value));
+  const current = ++bottomRevision;
+  scrollTop.value = Math.max(0, totalHeight.value + props.paddingBottom - viewportHeight.value);
+  calculateVisibleRange(scrollTop.value);
   nextTick(() => {
-    if (disposed) return;
+    if (disposed || current !== bottomRevision) return;
     scrollToPosition(Math.max(0, totalHeight.value + props.paddingBottom - viewportHeight.value));
   });
 };
@@ -370,7 +397,8 @@ watch(
 
 onMounted(() => {
   initializeHeights();
-  calculateVisibleRange(0);
+  if (props.followBottom) scrollToBottom();
+  else calculateVisibleRange(0);
   if (props.defaultScrollIndex) scrollToIndex(props.defaultScrollIndex);
   nextTick(() => {
     if (!props.itemFixed) measureItemHeights();
@@ -445,7 +473,11 @@ defineExpose({
             ? '[&::-webkit-scrollbar-thumb]:bg-cover/25 [&::-webkit-scrollbar-thumb:hover]:bg-cover/45'
             : '',
         ]"
+        tabindex="0"
         @scroll="handleScroll"
+        @wheel.passive="handleScrollIntent($event.deltaY)"
+        @touchstart.passive="handleScrollIntent(-1)"
+        @keydown="handleScrollKey"
       >
         <div
           v-show="items.length > 0"

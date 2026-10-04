@@ -24,7 +24,13 @@ export interface TogetherSong {
   durationMs: number;
   cover?: string;
 }
+export interface TogetherFriendPage {
+  items: { id: string; name: string; mutual: boolean }[];
+  more: boolean;
+}
 export interface TogetherSnapshot {
+  /** 已核验的房主，用于区分房主专用 UI；缺失时不推断权限。 */
+  creatorId?: string;
   mode?: "native" | "desktop-cdp";
   playbackOwned?: boolean;
   commandSeq?: number;
@@ -58,6 +64,13 @@ export interface TogetherPlaybackEnd {
   commandSeq: number;
 }
 export interface TogetherApi {
+  friends: (
+    kind: "following" | "followers",
+    offset: number,
+  ) => Promise<SocialResult<TogetherFriendPage>>;
+  diagnostics: () => Promise<SocialResult<{ enabled: boolean; error?: string }>>;
+  setDiagnostics: (enabled: boolean) => Promise<SocialResult<{ enabled: boolean; error?: string }>>;
+  openDiagnostics: () => Promise<SocialResult<void>>;
   chooseClient: () => Promise<SocialResult<string>>;
   connect: (chooseClient?: boolean) => Promise<SocialResult<TogetherSnapshot>>;
   stop: () => Promise<SocialResult<void>>;
@@ -78,5 +91,6 @@ export interface TogetherApi {
   ended: (input: TogetherPlaybackEnd) => Promise<SocialResult<void>>;
   recommendations: () => Promise<SocialResult<TogetherSong[]>>;
   add: (songId: string) => Promise<SocialResult<TogetherSnapshot>>;
+  addMany: (songIds: string[]) => Promise<SocialResult<TogetherSnapshot>>;
   onUpdate: (callback: (snapshot: TogetherSnapshot) => void) => () => void;
 }

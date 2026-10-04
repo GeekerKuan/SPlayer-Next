@@ -50,6 +50,30 @@ test("native message cards retain resource data, avatar identity and safe fallba
     }),
   );
   assert.equal(image.card?.type, "image");
+  const sized = decodeContent(
+    JSON.stringify({
+      type: 16,
+      picInfo: {
+        picUrl: "https://p1.music.126.net/image.jpg",
+        width: 800,
+        height: 1600,
+      },
+    }),
+  );
+  assert.equal(sized.card?.width, 800);
+  assert.equal(sized.card?.height, 1600);
+  const malformed = decodeContent(
+    JSON.stringify({
+      type: 16,
+      picInfo: {
+        picUrl: "https://p1.music.126.net/image.jpg",
+        width: -1,
+        height: 999999,
+      },
+    }),
+  );
+  assert.equal(malformed.card?.width, undefined);
+  assert.equal(malformed.card?.cover, sized.card?.cover);
   const unsafe = decodeContent(
     JSON.stringify({
       type: 23,
@@ -170,6 +194,31 @@ test("server business errors are not retried", async () => {
   );
   assert.equal(calls, 1);
 });
+test("HTTP 429 cools down this account without replaying writes, then expires or resets on account change", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: 100000 });
+  let token = "first",
+    calls = 0;
+  const transport = createNativeTransport({
+    cookies: () => ({ MUSIC_U: token }),
+    mergeCookies: () => {},
+    fetch: async () => {
+      calls++;
+      return calls === 1
+        ? new Response("", { status: 429, headers: { "retry-after": "2" } })
+        : new Response('{"code":200}');
+    },
+  });
+  const signal = new AbortController().signal;
+  await assert.rejects(transport.call("roomAdd", {}, signal), /rate-limited/);
+  await assert.rejects(transport.call("roomStatus", {}, signal), /rate-limited/);
+  assert.equal(calls, 1);
+  t.mock.timers.tick(2000);
+  await transport.call("roomStatus", {}, signal);
+  assert.equal(calls, 2);
+  token = "second";
+  await transport.call("roomStatus", {}, signal);
+  assert.equal(calls, 3);
+});
 test("account changes cannot merge cookies from old requests", async () => {
   let token = "old";
   let merged = false;
@@ -262,6 +311,38 @@ test("read watermark cannot exceed fetched history and is only local", async () 
   assert.equal(f.calls.includes("read"), false);
   f.service.stop();
 });
+
+test("explicit failed send retries share their original bubble and never replay an unknown result", async (context) => {
+  let now = 10000;
+  context.mock.method(Date, "now", () => now);
+  let sends = 0;
+  const f = fixture(async (operation) => {
+    if (operation === "account") return { code: 200, account: { id: 1 } };
+    if (operation === "send") {
+      sends++;
+      if (sends === 1) throw new Error("send-failed");
+      if (sends === 3) throw new Error("send-unknown");
+    }
+    return { code: 200 };
+  });
+  try {
+    const first = await f.service.send({ peerId: "2", text: "hello", clientId: randomUUID() });
+    assert.equal(first.delivery, "failed");
+    now += 1500;
+    const results = await Promise.all([f.service.retry(first.id), f.service.retry(first.id)]);
+    assert.ok(results.every((item) => item.id === first.id && item.delivery === "sent"));
+    assert.equal(sends, 2);
+    assert.equal((await f.service.snapshot()).messages["2"].length, 1);
+    await assert.rejects(f.service.retry(first.id), /invalid-input/);
+    now += 1500;
+    const unknown = await f.service.send({ peerId: "2", text: "another", clientId: randomUUID() });
+    assert.equal(unknown.delivery, "unknown");
+    await assert.rejects(f.service.retry(unknown.id), /invalid-input/);
+    assert.equal(sends, 3);
+  } finally {
+    f.service.stop();
+  }
+});
 test("account switch clears previous messages and logout removes account cache", async () => {
   const f = fixture();
   await f.service.open("2");
@@ -294,4 +375,71 @@ test("stop aborts pending history and prevents stale response publication", asyn
 });
 test("empty snapshot contains no credentials", () => {
   assert.equal(JSON.stringify(emptySocialSnapshot()).includes("MUSIC_U"), false);
+});
+
+test("friend pagination signs the UID path and retains the original request fields", async () => {
+  const seen: { path: string; data: Record<string, unknown> }[] = [];
+  const transport = createNativeTransport({
+    cookies: () => ({ MUSIC_U: "test" }),
+    mergeCookies: () => {},
+    fetch: async (url, init) => {
+      const decipher = createDecipheriv("aes-128-ecb", Buffer.from("e82ckenh8dichen8"), null);
+      const plain = Buffer.concat([
+        decipher.update(Buffer.from(new URLSearchParams(String(init?.body)).get("params")!, "hex")),
+        decipher.final(),
+      ])
+        .toString()
+        .split("-36cd479b6b5-");
+      seen.push({ path: plain[0], data: JSON.parse(plain[1]) });
+      assert.equal(String(url), `https://interfacepc.music.163.com/eapi/${plain[0].slice(5)}`);
+      return new Response('{"code":200}');
+    },
+  });
+  const signal = new AbortController().signal;
+  await transport.call(
+    "userFollows",
+    { userId: "1", offset: 100, limit: 100, order: true },
+    signal,
+  );
+  await transport.call(
+    "userFollowers",
+    { userId: "1", offset: 0, limit: 100, time: "0", getcounts: "true" },
+    signal,
+  );
+  assert.equal(seen[0].path, "/api/user/getfollows/1");
+  assert.equal(seen[0].data.userId, undefined);
+  assert.equal(seen[0].data.offset, 100);
+  assert.equal(seen[0].data.order, true);
+  assert.equal(seen[1].path, "/api/user/getfolloweds/1");
+  assert.equal(seen[1].data.userId, "1");
+  assert.equal(seen[1].data.time, "0");
+  assert.equal(seen[1].data.getcounts, "true");
+});
+
+test("missing or invalid Retry-After uses a full minute of local cooldown", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: 100000 });
+  for (const retryAfter of [undefined, "invalid", "-1"]) {
+    let calls = 0;
+    const transport = createNativeTransport({
+      cookies: () => ({ MUSIC_U: "test" }),
+      mergeCookies: () => {},
+      fetch: async () => {
+        calls++;
+        return calls === 1
+          ? new Response("", {
+              status: 429,
+              headers: retryAfter ? { "retry-after": retryAfter } : {},
+            })
+          : new Response('{"code":200}');
+      },
+    });
+    const signal = new AbortController().signal;
+    await assert.rejects(transport.call("roomStatus", {}, signal), /rate-limited/);
+    t.mock.timers.tick(59999);
+    await assert.rejects(transport.call("roomStatus", {}, signal), /rate-limited/);
+    assert.equal(calls, 1);
+    t.mock.timers.tick(1);
+    await transport.call("roomStatus", {}, signal);
+    assert.equal(calls, 2);
+  }
 });

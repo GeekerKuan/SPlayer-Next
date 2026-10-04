@@ -111,6 +111,9 @@ export const registerSocialIpc = (): void => {
     ),
   );
   handle("send", async (args) => socialService.send(z.tuple([socialSend]).parse(args)[0]));
+  handle("retry", async (args) =>
+    socialService.retry(z.tuple([z.string().min(1).max(100)]).parse(args)[0]),
+  );
   handle("localRead", async (args) =>
     socialService.localRead(...z.tuple([socialPeer, socialTime]).parse(args)),
   );

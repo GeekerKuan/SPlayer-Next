@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+vi.mock("@main/utils/paths", () => ({ logsDir: "C:/splayer-test/logs" }));
 import type { TogetherSnapshot } from "@shared/types/together";
 
 const mocks = vi.hoisted(() => ({

@@ -26,6 +26,10 @@ import { loadRoomResume, saveRoomResume } from "./roomSession";
 import { coreLog } from "@main/utils/logger";
 import { loadInvitePreview } from "./invitePreview";
 import type { TogetherClipboardInvite } from "@shared/types/together";
+import path from "node:path";
+import { logsDir } from "@main/utils/paths";
+import { TogetherDiagnostics } from "./diagnostics";
+export const togetherDiagnostics = new TogetherDiagnostics(path.join(logsDir, "together-debug"));
 const stats = createTogetherStats(insertPlayEvent);
 const transport = createNativeTransport({
   cookies: getNeteaseCookies,
@@ -34,6 +38,7 @@ const transport = createNativeTransport({
 });
 let lastNativeKey = "";
 const update = (snapshot: TogetherSnapshot): void => {
+  togetherDiagnostics.snapshot(snapshot);
   const window = getMainWindow();
   // WebContents 的 destroyed 回调早于 BrowserWindow 销毁，停机快照不能再发送。
   if (!window || window.isDestroyed() || window.webContents.isDestroyed()) return;
@@ -58,6 +63,7 @@ const update = (snapshot: TogetherSnapshot): void => {
   window.webContents.send("together:update", snapshot);
 };
 const native = new NativeTogetherService({
+  diagnostic: (fields) => togetherDiagnostics.record("add", fields),
   account: () => socialService.snapshot(),
   transport,
   update,
@@ -120,6 +126,7 @@ const remember = async (operation: Promise<TogetherSnapshot>): Promise<TogetherS
 };
 /** 模式只在显式连接时改变，不以 CDP 自动补救独立模式的协议失败。 */
 export const togetherService = {
+  friends: (kind: "following" | "followers", offset: number) => native.friends(kind, offset),
   previewInvite: async (invite: TogetherClipboardInvite, signal: AbortSignal) => {
     const token = getNeteaseCookies().MUSIC_U;
     const account = await socialService.snapshot();
@@ -188,11 +195,23 @@ export const togetherService = {
     return remember(native.joinLink(invite));
   },
   leave: () => remember(selected().leave()),
-  control: (input: TogetherControl) => remember(selected().control(input)),
+  control: (input: TogetherControl) => {
+    if (togetherDiagnostics.enabled)
+      togetherDiagnostics.record("control", {
+        action: input.action,
+        positionMs: input.action === "seek" ? input.positionMs : undefined,
+        localProgressMs: Math.max(0, Math.round(toMs(getPlayer().getPosition()))),
+      });
+    return remember(selected().control(input));
+  },
   ended: async (input: TogetherPlaybackEnd): Promise<void> => {
     if (mode === "native") native.notifyEnded(input);
   },
   recommendations: () => selected().recommendations(),
   add: (songId: string) => remember(selected().add(songId)),
+  addMany: (songIds: string[]) => {
+    if (mode !== "native") throw new Error("native-mode-required");
+    return remember(native.addMany(songIds));
+  },
 };
 setTogetherControlHandler((input) => togetherService.control(input));

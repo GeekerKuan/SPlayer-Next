@@ -2434,6 +2434,7 @@
       "room-not-owned": "当前房间尚未由 SPlayer 接管，请退出原房间后重新加入",
       "mode-in-room": "请先退出房间，再切换实现方式",
       "room-operation-failed": "房间操作未被服务器确认",
+      "room-add-unconfirmed": "暂未在房间确认本次加歌，请稍后查看房间歌单；未重复发送加歌请求。",
       "room-expired": "房间或心跳已失效，请重新加入",
       "no-room-song": "暂无可用的网易云房间歌曲",
       "room-songs-only": "一起听期间仅能播放房间队列中的网易云歌曲",
@@ -2445,7 +2446,8 @@
       "disabled": "此功能已关闭",
       "no-resume": "暂无可接续的设备会话",
       "unsupported-resume": "该设备会话暂不支持在本机接续",
-      "room-next-unconfirmed": "下一首尚未确认，可手动切歌；不会重复发送结果未知的指令。"
+      "room-next-unconfirmed": "下一首尚未确认，可手动切歌；不会重复发送结果未知的指令。",
+      "no-new-room-songs": "没有可添加的新网易云歌曲"
     },
     "together": {
       "playbackOwner": "一起听仅支持网易云歌曲，由官方客户端播放；SPlayer 本地音源暂停。",
@@ -2520,7 +2522,31 @@
       "previewLoading": "正在读取邀请信息…",
       "noInvitationSong": "此邀请未提供可读取的歌曲信息，加入后同步房间歌曲。",
       "inviteExpired": "该邀请已失效或房间暂不可加入。",
-      "viewCurrentRoom": "查看当前房间"
+      "viewCurrentRoom": "查看当前房间",
+      "diagnostics": "记录一起听诊断日志",
+      "diagnosticsHint": "默认关闭，仅本次启动有效。记录匿名状态与操作耗时，不记录聊天、Cookie 或邀请链接。",
+      "openDiagnostics": "打开日志目录",
+      "diagnosticsError": "暂时无法读写或打开诊断日志目录，请检查目录权限。",
+      "addPlaylist": "将歌单添加到一起听",
+      "adding": "正在添加到一起听…",
+      "addList": "将列表添加到一起听",
+      "addLoadedSongs": "将已加载歌曲添加到一起听",
+      "unsupportedCard": "此卡片不支持添加到一起听，请选择网易云歌曲、歌单或专辑",
+      "unsupportedMode": "此播放模式暂不支持一起听",
+      "loadingPlaylist": "正在读取歌单…",
+      "mutualFriends": "互关好友",
+      "followingFriends": "我的关注",
+      "followersFriends": "我的粉丝",
+      "loadingFriends": "正在加载好友…",
+      "friendsUnavailable": "好友列表暂不可用，可选择最近会话或填写好友 ID。",
+      "moreFriends": "加载更多好友",
+      "availableSongs": "可添加歌曲",
+      "noAvailableSongs": "暂无可添加的歌曲，可切换歌曲来源。",
+      "playlistOnly": "仅播放房间歌单（房主）",
+      "playlistOnlyHint": "自动推荐已关闭，仅播放房间歌单。仍可从其他页面手动添加歌曲。",
+      "memberRole": "房员 · 跟随房间播放",
+      "memberAddingHint": "可手动添加歌曲。自动续歌由房主优先处理，本机跟随房间歌单更新。",
+      "memberWaiting": "正在等待房间下一首；长时间未更新时，本机按续歌规则尝试接续。"
     },
     "chooseDetail": "请选择左侧消息查看详情",
     "openPlayer": "展开播放界面",
@@ -2537,6 +2563,12 @@
       "image": "图片",
       "general": "消息卡片"
     },
-    "inviteActionHint": "接受后加入对方房间"
+    "inviteActionHint": "接受后加入对方房间",
+    "inviteService": "网易云音乐 · 一起听",
+    "retrySend": "重新发送此消息",
+    "image": {
+      "retry": "图片加载失败，点击重试",
+      "open": "查看原图"
+    }
   }
 }

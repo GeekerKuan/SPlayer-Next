@@ -18,6 +18,7 @@ export interface CoverListProps {
   rounded?: string;
   /** 封面占位图 */
   fallback?: string;
+  addActionLabel?: string;
   /** 横向 padding（px） */
   paddingX?: number;
   /** 顶部 padding（px） */
@@ -55,6 +56,7 @@ const virtualPaddingBottom = computed(() =>
 const emit = defineEmits<{
   click: [item: CoverItem];
   reachBottom: [];
+  addToTogether: [item: CoverItem];
 }>();
 
 const virtualListRef = ref<SVirtualListExposed | null>(null);
@@ -155,6 +157,8 @@ const getRowKey = (row: Row): string => row.id;
           :type="type"
           :rounded="rounded"
           :fallback="fallback"
+          :add-action-label="addActionLabel"
+          @add-to-together="emit('addToTogether', item)"
           @click="emit('click', item)"
         />
       </div>
@@ -177,6 +181,8 @@ const getRowKey = (row: Row): string => row.id;
       :type="type"
       :rounded="rounded"
       :fallback="fallback"
+      :add-action-label="addActionLabel"
+      @add-to-together="emit('addToTogether', item)"
       @click="emit('click', item)"
     />
   </div>

@@ -1,6 +1,6 @@
 import { app, BrowserWindow } from "electron";
 import { socialService } from "@main/services/social";
-import { togetherService } from "@main/services/social/together";
+import { togetherDiagnostics, togetherService } from "@main/services/social/together";
 import {
   initSocialNotifications,
   clearSocialNotifications,
@@ -202,7 +202,10 @@ export const initApp = (): void => {
     clearSocialNotifications();
     if (!neteasePlaybackSyncFlushed) {
       event.preventDefault();
-      void shutdownNeteasePlaybackSync().finally(() => {
+      void Promise.allSettled([
+        shutdownNeteasePlaybackSync(),
+        togetherDiagnostics.dispose(),
+      ]).finally(() => {
         neteasePlaybackSyncFlushed = true;
         app.quit();
       });

@@ -18,11 +18,13 @@ describe("social store", () => {
   const cancel = vi.fn();
   const stop = vi.fn(async () => {});
   const send = vi.fn(async () => ({ ok: true, data: { delivery: "sent" } }));
+  const retry = vi.fn();
   beforeEach(() => {
     setActivePinia(createPinia());
     cancel.mockClear();
     stop.mockClear();
     send.mockClear();
+    retry.mockReset();
     Object.defineProperty(window, "api", {
       configurable: true,
       value: {
@@ -34,6 +36,7 @@ describe("social store", () => {
           start: async () => ({ ok: true, data: state() }),
           stop,
           send,
+          retry,
         },
       },
     });
@@ -72,5 +75,68 @@ describe("social store", () => {
     await store.send();
     expect(send).not.toHaveBeenCalled();
     expect(store.error).toBe("empty-message");
+  });
+  it("coalesces retry clicks, retains newer drafts and rejects unknown sends", async () => {
+    const store = useSocialStore();
+    await store.start();
+    const message = {
+      id: "local:x",
+      clientId: "x",
+      peerId: "2",
+      senderId: "1",
+      kind: "text" as const,
+      text: "hello",
+      time: 10,
+      delivery: "failed" as const,
+    };
+    update({ ...state(), messages: { "2": [message] } });
+    store.selected = "2";
+    store.draft = "new draft";
+    let finish!: (value: unknown) => void;
+    retry.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const pending = store.retry(message.id);
+    await store.retry(message.id);
+    expect(retry).toHaveBeenCalledExactlyOnceWith(message.id);
+    finish({ ok: true, data: { ...message, delivery: "sent" } });
+    await pending;
+    expect(store.draft).toBe("new draft");
+    update({ ...state(), messages: { "2": [{ ...message, delivery: "unknown" }] } });
+    await store.retry(message.id);
+    expect(retry).toHaveBeenCalledTimes(1);
+  });
+  it("ignores retry results after an account switch", async () => {
+    const store = useSocialStore();
+    await store.start();
+    const message = {
+      id: "local:x",
+      clientId: "x",
+      peerId: "2",
+      senderId: "1",
+      kind: "text" as const,
+      text: "hello",
+      time: 10,
+      delivery: "failed" as const,
+    };
+    update({ ...state(), messages: { "2": [message] } });
+    store.selected = "2";
+    let finish!: (value: unknown) => void;
+    retry.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const pending = store.retry(message.id);
+    update(state("3"));
+    finish({ ok: false, error: "offline" });
+    await pending;
+    expect(store.error).toBe("");
+    expect(store.sending).toBe(false);
+    expect(store.snapshot.accountId).toBe("3");
   });
 });

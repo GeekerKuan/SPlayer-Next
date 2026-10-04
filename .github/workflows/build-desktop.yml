@@ -1,6 +1,6 @@
 name: Build social desktop installers
 
-# 本轮统一构建退出、续播状态与用户确认邀请预览修复。
+# 本轮统一构建消息滚动、好友邀请、批量加歌、末曲续歌与诊断修复。
 
 on:
   push:

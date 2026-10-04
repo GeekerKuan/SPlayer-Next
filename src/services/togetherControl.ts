@@ -5,6 +5,7 @@ interface Options {
   publish: (snapshot: TogetherSnapshot, localSeek?: boolean, seekEcho?: boolean) => void;
   send: (input: TogetherControl) => Promise<SocialResult<TogetherSnapshot>>;
   refresh: () => Promise<SocialResult<TogetherSnapshot>>;
+  position?: () => number;
 }
 interface SeekIntent {
   id: number;
@@ -16,7 +17,7 @@ interface SeekIntent {
   serverSeq: number;
 }
 
-/** 前端只保护本机拖动和过滤旧回声，协议、命令序列与切歌顺序仍由主进程维护。 */
+/** 前端保护本机拖动、暂停和继续；协议及命令序列仍由主进程维护。 */
 export class TogetherControls {
   private server: TogetherSnapshot | null = null;
   private seek: SeekIntent | null = null;
@@ -94,7 +95,9 @@ export class TogetherControls {
     if (this.job && snapshot.roomId !== this.job.roomId)
       this.finish(this.job.id, { ok: false, error: "cancelled" }, false);
     this.server = snapshot;
-    this.options.publish(this.project(snapshot), false, seekEcho);
+    const projected = this.project(snapshot);
+    if (seekEcho) this.clearSeek();
+    this.options.publish(projected, false, seekEcho);
   }
 
   private async reconcile(id: number, roomId: string): Promise<void> {
@@ -121,9 +124,10 @@ export class TogetherControls {
       return Promise.resolve({ ok: false, error: "invalid-position" });
     }
     const id = ++this.serial;
-    if (input.action === "seek") this.clearSeek();
+    const localAction = ["seek", "pause", "resume"].includes(input.action);
+    if (localAction) this.clearSeek();
     if (
-      input.action === "seek" &&
+      localAction &&
       snapshot?.mode === "native" &&
       snapshot.playbackOwned &&
       snapshot.connected
@@ -132,13 +136,18 @@ export class TogetherControls {
         id,
         roomId: snapshot.roomId,
         songId: snapshot.songId,
-        positionMs: input.positionMs,
-        playing: snapshot.playing,
+        positionMs:
+          input.action === "seek"
+            ? input.positionMs
+            : Math.max(0, this.options.position?.() ?? snapshot.progressMs),
+        playing:
+          input.action === "pause" ? false : input.action === "resume" ? true : snapshot.playing,
         startedAt: Date.now(),
         serverSeq: snapshot.commandSeq || 0,
       };
-      this.options.publish(this.project(snapshot), true);
-      // 与观察到的官方客户端回声窗口一致；到期只读核验，不重发控制。
+      // 暂停/继续不改变本地进度；投影快照跳过新指令的强制 seek。
+      this.options.publish(this.project(snapshot), input.action === "seek", true);
+      // 只等待有限的确认窗口；成功即回收，到期只读核验，不重发控制。
       this.seekTimer = setTimeout(() => {
         this.clearSeek();
         void this.reconcile(id, snapshot.roomId);

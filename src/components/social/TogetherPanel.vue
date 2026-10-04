@@ -17,12 +17,6 @@ const invitePeer = ref(props.peerId || "");
 const validPeer = computed(
   () => /^[1-9]\d{0,19}$/.test(invitePeer.value) && invitePeer.value !== social.snapshot.accountId,
 );
-const recentPeers = computed(() =>
-  social.snapshot.conversations
-    .filter((peer) => peer.peerId !== social.snapshot.accountId)
-    .slice(0, 30)
-    .map((peer) => ({ value: peer.peerId, label: peer.name || peer.peerId })),
-);
 watch(
   () => props.peerId,
   (value) => {
@@ -49,6 +43,44 @@ const implementationSetting: SettingItem = {
   disabled: () => together.busy || !!together.snapshot.roomId,
 };
 const { t } = useI18n();
+const diagnosticsEnabled = ref(false);
+const diagnosticsBusy = ref(false);
+const diagnosticsError = ref(false);
+onMounted(async () => {
+  try {
+    const result = await window.api.together.diagnostics();
+    if (!mounted) return;
+    if (result.ok) {
+      diagnosticsEnabled.value = result.data.enabled;
+      diagnosticsError.value = !!result.data.error;
+    } else diagnosticsError.value = true;
+  } catch {
+    if (mounted) diagnosticsError.value = true;
+  }
+});
+async function changeDiagnostics(value: boolean): Promise<void> {
+  if (diagnosticsBusy.value) return;
+  diagnosticsBusy.value = true;
+  diagnosticsError.value = false;
+  try {
+    const result = await window.api.together.setDiagnostics(value);
+    if (!mounted) return;
+    if (result.ok) diagnosticsEnabled.value = result.data.enabled;
+    diagnosticsError.value = !result.ok || !!result.data.error;
+  } catch {
+    if (mounted) diagnosticsError.value = true;
+  } finally {
+    if (mounted) diagnosticsBusy.value = false;
+  }
+}
+async function openDiagnostics(): Promise<void> {
+  try {
+    const result = await window.api.together.openDiagnostics();
+    if (mounted) diagnosticsError.value = !result.ok;
+  } catch {
+    if (mounted) diagnosticsError.value = true;
+  }
+}
 const position = ref(0);
 const dragging = ref(false);
 const song = computed(() =>
@@ -98,6 +130,26 @@ async function replaceRoom(): Promise<void> {
   <div class="flex-1 min-h-0 flex flex-col gap-3">
     <div class="rounded-3 bg-on-surface/4 p-4 flex flex-col gap-3 shrink-0 max-h-3/5 overflow-auto">
       <SettingsItem :item="implementationSetting" />
+      <div class="flex items-center gap-3">
+        <div class="min-w-0 flex-1">
+          <div class="text-sm">{{ t("social.together.diagnostics") }}</div>
+          <div class="text-xs text-on-surface-variant mt-1">
+            {{ t("social.together.diagnosticsHint") }}
+          </div>
+        </div>
+        <SSwitch
+          :model-value="diagnosticsEnabled"
+          :disabled="diagnosticsBusy"
+          :aria-label="t('social.together.diagnostics')"
+          @update:model-value="changeDiagnostics"
+        />
+        <SButton size="small" variant="secondary" @click="openDiagnostics">
+          {{ t("social.together.openDiagnostics") }}
+        </SButton>
+      </div>
+      <p v-if="diagnosticsError" class="text-xs text-error" role="status">
+        {{ t("social.together.diagnosticsError") }}
+      </p>
       <TogetherClientSetting v-if="desktop && !inRoom" :disabled="together.busy" />
       <p class="text-sm text-on-surface-variant">
         {{ t(desktop ? "social.together.playbackOwner" : "social.together.nativePlayback") }}
@@ -155,13 +207,7 @@ async function replaceRoom(): Promise<void> {
         </template>
       </div>
       <div v-if="canInvite || !inRoom" class="flex items-center gap-2 flex-wrap">
-        <SSelect
-          v-if="recentPeers.length"
-          v-model="invitePeer"
-          :options="recentPeers"
-          :placeholder="t('social.together.recentPeers')"
-          class="min-w-40"
-        />
+        <TogetherFriendPicker v-model="invitePeer" :disabled="together.busy" />
         <SInput v-model="invitePeer" :placeholder="t('social.together.invitePeer')" class="w-52" />
         <span class="text-xs text-on-surface-variant">{{ t("social.together.inviteHint") }}</span>
       </div>

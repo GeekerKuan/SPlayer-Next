@@ -22,6 +22,8 @@ export interface SocialContent {
     title: string;
     subtitle?: string;
     cover?: string;
+    width?: number;
+    height?: number;
     url?: string;
   };
 }
@@ -92,6 +94,7 @@ export interface SocialApi {
     cursor: number,
   ) => Promise<SocialResult<SocialPage<SocialNotice>>>;
   send: (input: SocialSendInput) => Promise<SocialResult<SocialMessage>>;
+  retry: (messageId: string) => Promise<SocialResult<SocialMessage>>;
   localRead: (peerId: string, time: number) => Promise<SocialResult<SocialSnapshot>>;
   localReadNotices: (kind: NoticeKind, time: number) => Promise<SocialResult<SocialSnapshot>>;
   dismissInvite: (peerId: string, messageId: string) => Promise<SocialResult<SocialSnapshot>>;

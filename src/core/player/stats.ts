@@ -12,6 +12,7 @@
 import type { Track } from "@shared/types/player";
 import { useMediaStore } from "@/stores/media";
 import { useStatusStore } from "@/stores/status";
+import { useHistoryStore } from "@/stores/history";
 
 /** 低于此收听时长不记录 */
 const MIN_RECORD_MS = 5000;
@@ -24,10 +25,17 @@ interface Session {
   listenedMs: number;
   /** 进入 playing 的墙钟时刻 */
   playingSince: number | null;
+  historyRecorded: boolean;
 }
 
 let session: Session | null = null;
 let installed = false;
+/** 首次实际播放便更新原历史；暂停、续播及位置推送不重复插入。 */
+const recordHistory = (): void => {
+  if (!session || session.historyRecorded) return;
+  session.historyRecorded = true;
+  void useHistoryStore().record(session.track);
+};
 
 /** 曲目身份标识 */
 const trackKey = (track: Track): string => `${track.source}:${track.id}`;
@@ -42,7 +50,14 @@ const settle = (): void => {
 /** 为指定曲目开新会话 */
 const begin = (track: Track, playing: boolean): void => {
   const now = Date.now();
-  session = { track, startedAt: now, listenedMs: 0, playingSince: playing ? now : null };
+  session = {
+    track,
+    startedAt: now,
+    listenedMs: 0,
+    playingSince: playing ? now : null,
+    historyRecorded: false,
+  };
+  if (playing) recordHistory();
 };
 
 /** 结算当前会话并落库 */
@@ -80,6 +95,7 @@ export const installPlayStats = (): void => {
       finalize();
       if (media.track) begin(media.track, status.state === "playing");
     },
+    { immediate: true },
   );
 
   // 播放态变化:在同一会话内累计 / 暂停计时
@@ -88,6 +104,7 @@ export const installPlayStats = (): void => {
     (state) => {
       if (!session) return;
       if (state === "playing") {
+        recordHistory();
         if (session.playingSince === null) session.playingSince = Date.now();
       } else {
         settle();

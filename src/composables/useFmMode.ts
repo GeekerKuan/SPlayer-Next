@@ -3,6 +3,7 @@ import { useUserStore } from "@/stores/user";
 import { useStatusStore } from "@/stores/status";
 import { toast } from "@/composables/useToast";
 import * as player from "@/core/player";
+import { ownsTogetherPlayback } from "@/services/togetherSession";
 
 /**
  * 私人 FM
@@ -19,6 +20,10 @@ export const useFmMode = () => {
    * @param options - 可选的 FM 模式与场景选项
    */
   const enterFmMode = async (options?: PersonalFmOptions): Promise<void> => {
+    if (ownsTogetherPlayback()) {
+      toast.info(t("social.together.unsupportedMode"));
+      return;
+    }
     if (status.fmMode && !options) {
       toast.info(t("player.fm.already"));
       return;

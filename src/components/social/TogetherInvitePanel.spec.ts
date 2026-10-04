@@ -56,6 +56,16 @@ describe("clipboard invitation confirmation", () => {
     });
     useTogetherDialog().showInvitation(invite);
   });
+  it("ignores our own invitation without changing an existing dialog or fetching metadata", () => {
+    const dialog = useTogetherDialog();
+    dialog.open.value = false;
+    dialog.showInvitation({ ...invite, invitation: { roomId: "own-room", inviterId: "1" } });
+    expect(dialog.open.value).toBe(false);
+    expect(window.api.together.previewInvite).not.toHaveBeenCalled();
+    dialog.showDebug();
+    dialog.showInvitation({ ...invite, invitation: { roomId: "own-room", inviterId: "1" } });
+    expect(dialog.debug.value).toBe(true);
+  });
   it("renders both avatars and the shared song without joining until the user accepts", async () => {
     const wrapper = create();
     await flushPromises();
