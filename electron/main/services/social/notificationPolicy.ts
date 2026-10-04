@@ -28,7 +28,7 @@ export class SocialNotificationPolicy {
       this.times.set(item.peerId, item.updatedAt);
       if (
         !baseline &&
-        item.unread > 0 &&
+        (item.unread > 0 || item.content?.kind === "invite") &&
         item.updatedAt > time &&
         item.updatedAt >= snapshot.updatedAt - 60000 &&
         !(item.content?.kind === "invite" && item.content.invite?.inviterId === snapshot.accountId)

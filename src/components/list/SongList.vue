@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { ownsTogetherPlayback } from "@/services/togetherSession";
 import type { Artist, PlaybackContext, Track, TrackSource } from "@shared/types/player";
 import type { CollectionType } from "@/types/collection";
 import type { SortField } from "@/types/list";
@@ -279,6 +280,10 @@ const onListContextMenu = (event: MouseEvent): void => {
  */
 const onTrackDblClick = (item: Track, index: number): void => {
   if (batch.active.value) return;
+  if (ownsTogetherPlayback()) {
+    void player.playNow(item, props.playbackContext);
+    return;
+  }
   if (route.name === "search" && settings.player.searchPlayBehavior !== "all") {
     void player.playNow(item, props.playbackContext);
     return;

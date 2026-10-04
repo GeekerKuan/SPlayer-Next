@@ -2447,7 +2447,8 @@
       "no-resume": "No device session is available",
       "unsupported-resume": "This device session is not supported yet",
       "room-next-unconfirmed": "The next track is unconfirmed. You can skip manually; uncertain commands will not be replayed.",
-      "no-new-room-songs": "No new NetEase songs to add"
+      "no-new-room-songs": "No new NetEase songs to add",
+      "room-current-song": "The playing song is retained. Switch songs before removing it."
     },
     "together": {
       "playbackOwner": "Only NetEase songs are supported. The official client plays room audio; SPlayer local playback is stopped.",

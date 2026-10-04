@@ -9,11 +9,10 @@ import { getCurrentTime, setCurrentTime, setDuration, setPlaying } from "./playb
 import { setTogetherSession } from "./togetherSession";
 import { beginLoad as beginLyricLoad } from "./lyric/loader";
 
-let pending: { snapshot: TogetherSnapshot; seekEcho: boolean } | null = null;
+let pending: TogetherSnapshot | null = null;
 let applying = false;
 let generation = 0;
 let roomId = "";
-let appliedSeq = -1;
 let queueKey = "";
 let identity = "";
 let failedKey = "";
@@ -67,7 +66,7 @@ export const applyTogetherPlayback = (
   snapshot: TogetherSnapshot,
   onError?: (error: string) => void,
   localSeek = false,
-  seekEcho = false,
+  _seekEcho = false,
 ): void => {
   if (localSeek) {
     localSeekPending = true;
@@ -76,21 +75,21 @@ export const applyTogetherPlayback = (
   }
   if (onError) reportError = onError;
   setTogetherSession(snapshot);
-  const nextIdentity = `${snapshot.roomId}:${snapshot.playbackRevision ?? snapshot.commandSeq ?? 0}:${snapshot.playbackOwned}:${snapshot.connected}:${snapshot.songId}:${snapshot.awaitingNext}`;
+  const nextIdentity = `${snapshot.roomId}:${snapshot.playbackOwned}:${snapshot.connected}:${snapshot.songId}:${snapshot.awaitingNext}`;
   if (nextIdentity !== identity) {
     generation++;
     identity = nextIdentity;
   }
   if ((snapshot.mode !== "native" || !snapshot.playbackOwned) && queue.getTemporaryPlaybackState())
     restoreRoomQueue();
-  pending = { snapshot, seekEcho };
+  pending = snapshot;
   if (!applying) void drain();
 };
 const drain = async (): Promise<void> => {
   applying = true;
   try {
     while (pending) {
-      const { snapshot, seekEcho } = pending;
+      const snapshot = pending;
       pending = null;
       const token = generation;
       const seekSerial = localSeekSerial;
@@ -98,7 +97,6 @@ const drain = async (): Promise<void> => {
         localSeekPending = false;
         clearLocalSeek();
         roomId = "";
-        appliedSeq = -1;
         queueKey = "";
         // 连接过程的只读快照不取消预备状态；拥有的房间结束后才释放临时队列。
         if (queue.getTemporaryPlaybackState()) restoreRoomQueue();
@@ -112,7 +110,6 @@ const drain = async (): Promise<void> => {
       }
       if (snapshot.roomId !== roomId) {
         roomId = snapshot.roomId;
-        appliedSeq = -1;
         queueKey = "";
       }
       const tracks: Track[] = snapshot.songs.map((song) => ({
@@ -160,15 +157,14 @@ const drain = async (): Promise<void> => {
         clearLocalSeek();
         continue;
       }
-      const revision = snapshot.playbackRevision ?? snapshot.commandSeq ?? 0;
-      const newCommand = revision > appliedSeq;
+      let loaded = false;
       if (
         media.track?.source !== "netease" ||
         media.track.id !== track.id ||
         !status.currentSource ||
         ["idle", "stopped"].includes(status.state)
       ) {
-        const failureKey = `${snapshot.roomId}:${track.id}:${revision}`;
+        const failureKey = `${snapshot.roomId}:${track.id}`;
         if (failedKey === failureKey && Date.now() < retryAt) {
           reportError?.("room-audio-unavailable");
           continue;
@@ -196,13 +192,14 @@ const drain = async (): Promise<void> => {
           reportError?.("room-audio-unavailable");
           continue;
         }
+        loaded = true;
         failedKey = "";
         reportError?.("");
       }
       if (
         localSeekPending ||
-        // 本机拖动的确认回声只在明显偏离时校准，避免 ACK 再次打断解码。
-        (newCommand && !seekEcho) ||
+        // 新曲定位与本机拖动必须执行；同曲确认只在明显偏离时校准。
+        (loaded && snapshot.progressMs > 0) ||
         Math.abs(getCurrentTime() - snapshot.progressMs) > 3000
       ) {
         if (token !== generation) continue;
@@ -212,7 +209,6 @@ const drain = async (): Promise<void> => {
       if (token !== generation) continue;
       if (snapshot.playing && !status.isPlaying) await window.api.player.play();
       else if (!snapshot.playing && status.isPlaying) await window.api.player.pause();
-      appliedSeq = revision;
     }
   } catch (error) {
     console.warn("[together] 播放同步失败", error);
@@ -227,7 +223,6 @@ export const disposeTogetherPlayback = (): void => {
   generation++;
   pending = null;
   roomId = "";
-  appliedSeq = -1;
   queueKey = "";
   identity = "";
   failedKey = "";

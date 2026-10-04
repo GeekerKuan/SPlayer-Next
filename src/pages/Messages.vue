@@ -258,6 +258,7 @@ onBeforeUnmount(() => {
           class="conversation-pane relative w-64 max-w-2/5 shrink-0 flex flex-col min-h-0 border-0 border-r border-solid border-primary/12"
         >
           <div class="message-pane-header message-tabs">
+            <div class="message-header-glass glass-panel" aria-hidden="true" />
             <STabs
               v-model="tab"
               :tabs="tabs"
@@ -272,7 +273,7 @@ onBeforeUnmount(() => {
             class="conversation-list flex-1 min-h-0"
             :items="rows"
             :item-height="76"
-            :padding-top="16"
+            :padding-top="4"
             item-fixed
             :get-item-key="(item) => `${tab}:${item.id}`"
           >
@@ -321,6 +322,7 @@ onBeforeUnmount(() => {
         <div class="detail-pane flex-1 min-w-0 min-h-0 flex flex-col">
           <template v-if="tab === 'chat' && social.selected">
             <div class="message-pane-header detail-header">
+              <div class="message-header-glass glass-panel" aria-hidden="true" />
               <div class="relative z-1 px-4 py-3 font-medium truncate">
                 {{ peer?.name || social.selected }}
               </div>
@@ -404,6 +406,7 @@ onBeforeUnmount(() => {
           </template>
           <template v-else-if="tab !== 'chat' && activeNotice">
             <div class="message-pane-header detail-header">
+              <div class="message-header-glass glass-panel" aria-hidden="true" />
               <div class="relative z-1 px-4 py-3 font-medium truncate">
                 {{ t(`social.tabs.${tab}`) }}
               </div>
@@ -448,24 +451,19 @@ onBeforeUnmount(() => {
 }
 .message-tabs {
   height: 48px;
-  padding: 4px 8px 8px;
+  padding: 4px 8px;
   pointer-events: none;
 }
-/* 标题留在滚动容器外；共用遮罩仅覆盖内容顶部 16px，不让滚动条进入标题栏。 */
-.message-pane-header::before {
-  content: "";
+/* 复用原生 glass-panel 的主题与图片背景适配，渐隐只覆盖内容边缘。 */
+.message-header-glass {
   position: absolute;
-  inset: 0 0 -16px;
-  background: linear-gradient(
-    to bottom,
-    rgb(var(--s-surface-panel) / 0.96),
-    rgb(var(--s-surface-panel) / 0.8) 55%,
-    rgb(var(--s-surface-panel) / 0.45) 80%,
-    transparent
-  );
-  backdrop-filter: blur(10px);
-  mask-image: linear-gradient(to bottom, black 55%, transparent);
+  inset: 0 6px -12px 0;
   pointer-events: none;
+  mask-image: linear-gradient(to bottom, black 55%, transparent);
+}
+.message-pane-header > :not(.message-header-glass) {
+  position: relative;
+  z-index: 1;
 }
 .message-tabs :deep([role="tablist"]) {
   z-index: 1;

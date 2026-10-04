@@ -50,6 +50,9 @@ const operations = new Set([
   "recommendations",
   "add",
   "addMany",
+  "play",
+  "editQueue",
+  "historyCandidates",
 ]);
 const errors = new Set([
   "auth-required",
@@ -57,6 +60,7 @@ const errors = new Set([
   "account-mismatch",
   "offline",
   "rate-limited",
+  "room-current-song",
   "busy",
   "operation-unknown",
   "send-unknown",

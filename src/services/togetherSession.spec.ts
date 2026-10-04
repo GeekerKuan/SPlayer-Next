@@ -6,8 +6,9 @@ import {
   clearTogetherSession,
   playTogetherTrack,
   setTogetherSession,
-  setTogetherControlHandler,
   setTogetherAddHandler,
+  setTogetherPlayHandler,
+  playTogetherTracks,
   addTogetherTracks,
 } from "./togetherSession";
 vi.mock("@/composables/useToast", () => ({ toast: { info: vi.fn(), error: vi.fn() } }));
@@ -32,23 +33,31 @@ describe("room-only playback actions", () => {
     clearTogetherSession();
     setTogetherSession(room);
   });
-  it("uses a helpful add-to-room hint for a valid unqueued song without sending new writes", async () => {
-    const control = vi.fn();
-    setTogetherControlHandler(control);
-    await playTogetherTrack({ id: "11", source: "netease" } as Track);
-    expect(toast.info).toHaveBeenCalledWith("social.together.useRoomAdd");
-    expect(toast.error).not.toHaveBeenCalled();
-    expect(control).not.toHaveBeenCalled();
+  it("plays an unqueued official song through the atomic play handler without the obsolete add hint", async () => {
+    const play = vi.fn(async () => true);
+    setTogetherPlayHandler(play);
+    const track = { id: "11", source: "netease" } as Track;
+    await playTogetherTrack(track);
+    expect(play).toHaveBeenCalledExactlyOnceWith([track], 0);
+    expect(toast.info).not.toHaveBeenCalled();
   });
-  it("preserves the NetEase source guard and sends GOTO only for a confirmed room song", async () => {
-    const control = vi.fn(async () => ({ ok: true as const, data: room }));
-    setTogetherControlHandler(control);
-    await playTogetherTrack({ id: "10", source: "qqmusic" } as Track);
+  it("keeps the NetEase guard and preserves play-all order while filtering unsupported entries", async () => {
+    const play = vi.fn(async () => true);
+    setTogetherPlayHandler(play);
+    const tracks = [
+      { id: "qq", source: "qqmusic" },
+      { id: "11", source: "netease" },
+      { id: "private", source: "netease", cloud: true },
+      { id: "10", source: "netease" },
+    ] as Track[];
+    await playTogetherTracks(tracks);
     expect(toast.error).toHaveBeenCalledOnce();
-    expect(control).not.toHaveBeenCalled();
-    await playTogetherTrack({ id: "10", source: "netease" } as Track);
-    expect(control).toHaveBeenCalledExactlyOnceWith({ action: "goto", songId: "10" });
+    expect(play).not.toHaveBeenCalled();
+    await playTogetherTracks(tracks, 1);
+    expect(play).toHaveBeenCalledExactlyOnceWith([tracks[1], tracks[3]], 0);
     clearTogetherSession();
+    await playTogetherTrack(tracks[1]);
+    expect(play).toHaveBeenCalledOnce();
   });
   it("routes explicit queue additions through one batch handler and releases it on disposal", async () => {
     const add = vi.fn(async () => true);

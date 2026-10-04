@@ -15,6 +15,7 @@ export const defaultSystemConfig: SystemConfig = {
   player: {
     crossDeviceResume: true,
     togetherAutoRecommend: true,
+    togetherSongSource: "recommended",
     autoPlay: false,
     rememberLastTrack: true,
     fadeEnabled: true,

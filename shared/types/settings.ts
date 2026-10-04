@@ -45,6 +45,8 @@ export interface PlayerSettings {
   crossDeviceResume: boolean;
   /** 普通一起听队列播放到末尾时补充推荐歌曲 */
   togetherAutoRecommend: boolean;
+  /** 普通一起听队列自动补歌来源 */
+  togetherSongSource: "recommended" | "room" | "history";
   /** 加载后自动播放 */
   autoPlay: boolean;
   /** 记忆上次播放的歌曲 */

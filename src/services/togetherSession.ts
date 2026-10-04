@@ -1,12 +1,36 @@
-import type { TogetherControl, TogetherSnapshot } from "@shared/types/together";
+import type { TogetherControl, TogetherSnapshot, TogetherQueueEdit } from "@shared/types/together";
 import { toast } from "@/composables/useToast";
 import i18n from "@/i18n";
+import type { Track } from "@shared/types/player";
 import type { SocialResult } from "@shared/types/social";
 
 let current: TogetherSnapshot | null = null;
 let control: ((input: TogetherControl) => Promise<SocialResult<TogetherSnapshot>>) | null = null;
 let addTracks:
   ((tracks: readonly import("@shared/types/player").Track[]) => Promise<boolean>) | null = null;
+let playTracks: ((tracks: readonly Track[], index: number) => Promise<boolean>) | null = null;
+let editQueue: ((input: TogetherQueueEdit) => Promise<boolean>) | null = null;
+export const setTogetherPlayHandler = (handler: typeof playTracks): void => {
+  playTracks = handler;
+};
+export const setTogetherQueueHandler = (handler: typeof editQueue): void => {
+  editQueue = handler;
+};
+/** 队列面板改动走房间版本协议，不能直接覆盖本地临时队列。 */
+export const editTogetherQueue = async (input: TogetherQueueEdit): Promise<void> => {
+  if (ownsTogetherPlayback() && editQueue) await editQueue(input);
+};
+/** 播放全部保留歌单顺序；不能静默把首曲从其他平台换成网易云推荐。 */
+export const playTogetherTracks = async (tracks: readonly Track[], index = 0): Promise<void> => {
+  if (!tracks.length || !ownsTogetherPlayback()) return;
+  const target = tracks[Math.max(0, Math.min(index, tracks.length - 1))];
+  if (target.source !== "netease" || target.cloud) {
+    toast.error(i18n.global.t("social.errors.room-songs-only"));
+    return;
+  }
+  const songs = tracks.filter((track) => track.source === "netease" && !track.cloud);
+  if (playTracks) await playTracks(songs, songs.indexOf(target));
+};
 export const setTogetherAddHandler = (handler: typeof addTracks): void => {
   addTracks = handler;
 };
@@ -28,6 +52,8 @@ export const clearTogetherSession = (): void => {
   current = null;
   control = null;
   addTracks = null;
+  playTracks = null;
+  editQueue = null;
 };
 export const setTogetherSession = (snapshot: TogetherSnapshot): void => {
   current = snapshot;
@@ -51,11 +77,7 @@ export const playTogetherTrack = async (
     toast.error(i18n.global.t("social.errors.room-songs-only"));
     return;
   }
-  if (!current?.songs.some((s) => s.id === track.id)) {
-    toast.info(i18n.global.t("social.together.useRoomAdd"));
-    return;
-  }
-  await controlTogetherPlayback({ action: "goto", songId: track.id });
+  await playTogetherTracks([track]);
 };
 
 /** 用户播放操作走房间指令；远端应用直接使用原生 IPC，不经过此入口。 */

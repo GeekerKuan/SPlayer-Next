@@ -2447,7 +2447,8 @@
       "no-resume": "暂无可接续的设备会话",
       "unsupported-resume": "该设备会话暂不支持在本机接续",
       "room-next-unconfirmed": "下一首尚未确认，可手动切歌；不会重复发送结果未知的指令。",
-      "no-new-room-songs": "没有可添加的新网易云歌曲"
+      "no-new-room-songs": "没有可添加的新网易云歌曲",
+      "room-current-song": "当前正在播放的歌曲会保留，请先切换歌曲再移除。"
     },
     "together": {
       "playbackOwner": "一起听仅支持网易云歌曲，由官方客户端播放；SPlayer 本地音源暂停。",

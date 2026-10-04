@@ -4,6 +4,7 @@ import type {
   TogetherSnapshot,
   TogetherSong,
   TogetherFriendPage,
+  TogetherQueueEdit,
 } from "@shared/types/together";
 import type { SocialSnapshot } from "@shared/types/social";
 import type { NativeOperation, NativeTransport } from "./netease-native/transport";
@@ -42,6 +43,7 @@ interface Options {
     finished: boolean;
   };
   autoRecommend: () => boolean;
+  songSource?: () => "recommended" | "room" | "history";
 }
 
 interface PendingEnd extends TogetherPlaybackEnd {
@@ -49,6 +51,24 @@ interface PendingEnd extends TogetherPlaybackEnd {
   candidate?: string;
   sent: boolean;
   failed?: boolean;
+}
+
+interface PendingPlayback {
+  roomId: string;
+  songId: string;
+  playing: boolean;
+  progressMs: number;
+  at: number;
+  serverSeq: number;
+  until: number;
+  songs?: TogetherSong[];
+}
+interface PendingQueue {
+  roomId: string;
+  kind: "ADD" | "DELETE" | "REPLACE";
+  ids: string[];
+  versions: { userId: string | number; version: number; outerId?: string | null }[];
+  until: number;
 }
 
 /** 独立 HTTP 房间不依赖 CDP；应用拥有已加入房间，页面卸载仅停止页面订阅。 */
@@ -80,15 +100,34 @@ export class NativeTogetherService {
   private commandAt = 0;
   private commandProgress = 0;
   private pendingEnd: PendingEnd | null = null;
+  private pendingPlayback: PendingPlayback | null = null;
+  private pendingQueue: PendingQueue | null = null;
   private tailAttempt: { roomId: string; songId: string; candidate?: string } | null = null;
   private recommendationCache: { key: string; at: number; songs: TogetherSong[] } | null = null;
   private recommendationJob: { key: string; promise: Promise<TogetherSong[]> } | null = null;
+  private historyIds: string[] = [];
   private friendPages = new Map<string, { at: number; promise: Promise<TogetherFriendPage> }>();
   constructor(private options: Options) {}
 
   snapshot(): TogetherSnapshot {
     return structuredClone({
       ...this.state,
+      ...(this.pendingPlayback
+        ? {
+            songId: this.pendingPlayback.songId,
+            playing: this.pendingPlayback.playing,
+            progressMs: Math.min(
+              (this.pendingPlayback.songs || this.state.songs).find(
+                (s) => s.id === this.pendingPlayback!.songId,
+              )?.durationMs || 86400000,
+              this.pendingPlayback.progressMs +
+                (this.pendingPlayback.playing
+                  ? Math.max(0, Date.now() - this.pendingPlayback.at)
+                  : 0),
+            ),
+            songs: this.pendingPlayback.songs || this.state.songs,
+          }
+        : {}),
       awaitingNext: !!this.pendingEnd,
       ...(this.pendingEnd?.failed ? { error: "room-next-unconfirmed" } : {}),
     });
@@ -166,11 +205,14 @@ export class NativeTogetherService {
     this.lastHeartbeat = 0;
     this.commandAt = 0;
     this.pendingEnd = null;
+    this.pendingPlayback = null;
+    this.pendingQueue = null;
     this.ordinaryQueue = false;
     this.tailAttempt = null;
     this.recommendationCache = null;
     this.recommendationJob = null;
     this.friendPages.clear();
+    this.historyIds = [];
     this.state = {
       ...emptyTogetherSnapshot(),
       mode: "native",
@@ -202,6 +244,8 @@ export class NativeTogetherService {
     const status = parseRoomResponse(roomStatusSchema, await this.call("roomStatus")).data;
     const info = status.inRoom ? status.roomInfo : null;
     if (!info) {
+      this.pendingPlayback = null;
+      this.pendingQueue = null;
       this.pendingEnd = null;
       this.ordinaryQueue = false;
       if (this.ownedRoom) this.options.halt();
@@ -235,6 +279,8 @@ export class NativeTogetherService {
     this.ordinaryQueue = rawMode === undefined || rawMode === null || rawMode === "";
     const changedRoom = this.state.roomId !== info.roomId;
     if (changedRoom) {
+      this.pendingPlayback = null;
+      this.pendingQueue = null;
       this.metadata.clear();
       this.clientSeq = 0;
       this.commandAt = 0;
@@ -242,13 +288,66 @@ export class NativeTogetherService {
     this.versions = playlist.playlist.version;
     this.playMode = playlist.playlist.playMode;
     this.randomList = playlist.playlist.randomList?.result || [];
-    const ids = playlist.playlist.displayList.result;
+    let ids = playlist.playlist.displayList.result;
+    let queueError = "";
+    const queued = this.pendingQueue;
+    if (queued) {
+      const confirmed =
+        queued.kind === "ADD"
+          ? queued.ids.every((id) => ids.includes(id))
+          : queued.kind === "DELETE"
+            ? queued.ids.every((id) => !ids.includes(id))
+            : queued.ids.filter((id) => ids.includes(id)).join(",") ===
+              ids.filter((id) => queued.ids.includes(id)).join(",");
+      if (queued.roomId !== info.roomId || confirmed || Date.now() >= queued.until) {
+        this.pendingQueue = null;
+        if (!confirmed && queued.roomId === info.roomId) queueError = "room-add-unconfirmed";
+      } else {
+        // 仅覆盖本次增删；保留其他成员新加的曲目。未确认前不叠加第二份列表写请求。
+        ids =
+          queued.kind === "ADD"
+            ? [...ids, ...queued.ids.filter((id) => !ids.includes(id))]
+            : queued.kind === "DELETE"
+              ? ids.filter((id) => !queued.ids.includes(id))
+              : [
+                  ...queued.ids.filter((id) => ids.includes(id)),
+                  ...ids.filter((id) => !queued.ids.includes(id)),
+                ];
+        this.versions = queued.versions.map((local) => {
+          const remote = this.versions.find((v) => String(v.userId) === String(local.userId));
+          return remote && remote.version > local.version ? remote : local;
+        });
+      }
+    }
     const recommendations = playlist.playlist.displayList.rcmdSongIds || [];
     const all = await this.songs([...ids, ...recommendations]);
-    const songs = ids.map((id) => all.find((s) => s.id === id)!);
+    const byId = new Map(all.map((song) => [song.id, song]));
+    const songs = ids.map((id) => byId.get(id)!);
     const command = playlist.playCommand;
-    const newer = !!command && (changedRoom || command.serverSeq > (this.state.commandSeq || 0));
-    if (newer && command) {
+    const intent = this.pendingPlayback;
+    let reconcile = false;
+    if (
+      intent &&
+      (intent.roomId !== info.roomId ||
+        Date.now() >= intent.until ||
+        (command && command.serverSeq > intent.serverSeq))
+    ) {
+      const echo =
+        command &&
+        command.targetSongId === intent.songId &&
+        (command.playStatus === "PLAY") === intent.playing &&
+        Math.abs(command.progress - intent.progressMs) <= 3000;
+      if (echo) {
+        // 本机已继续播放，不将 ACK 中请求时刻的位置重新写回播放器。
+        this.commandProgress =
+          intent.progressMs + (intent.playing ? Math.max(0, Date.now() - intent.at) : 0);
+        this.commandAt = Date.now();
+      } else reconcile = true;
+      this.pendingPlayback = null;
+    }
+    const newer =
+      !!command && (changedRoom || reconcile || command.serverSeq > (this.state.commandSeq || 0));
+    if (newer && command && (!intent || reconcile)) {
       this.commandAt = Date.now();
       this.commandProgress = command.progress;
     }
@@ -291,11 +390,11 @@ export class NativeTogetherService {
       playbackRevision: changedRoom ? 1 : (this.state.playbackRevision || 0) + (newer ? 1 : 0),
       playMode: playlist.playlist.playMode,
       recommendationMode: playlist.playlist.listMode,
-      recommendations: recommendations.map((id) => all.find((s) => s.id === id)!),
+      recommendations: recommendations.map((id) => byId.get(id)!),
       updatedAt: Date.now(),
-      ...(!this.ownedRoom ? { error: "room-not-owned" } : {}),
+      ...(queueError ? { error: queueError } : !this.ownedRoom ? { error: "room-not-owned" } : {}),
     };
-    this.options.ownership(this.ownedRoom, this.ownedRoom ? songId : "");
+    this.options.ownership(this.ownedRoom, this.ownedRoom ? this.snapshot().songId : "");
     if (this.pendingEnd && !this.matchesEnd(this.pendingEnd)) this.pendingEnd = null;
   }
   private schedule(delayMs?: number): void {
@@ -506,7 +605,14 @@ export class NativeTogetherService {
   private async tailRecommendation(): Promise<TogetherSong | undefined> {
     const queued = new Set(this.state.songs.map((song) => song.id));
     const notQueued = (song: TogetherSong): boolean => !queued.has(song.id);
-    let candidate = this.state.recommendations?.find(notQueued);
+    const source = this.options.songSource?.() || "room";
+    if (source === "history") {
+      const id = this.historyIds.find((id) => !queued.has(id));
+      if (!id) return;
+      await this.songs([id]);
+      return this.metadata.get(id);
+    }
+    let candidate = source === "room" ? this.state.recommendations?.find(notQueued) : undefined;
     if (!candidate) candidate = (await this.personalRecommendations()).find(notQueued);
     if (candidate && !this.metadata.has(candidate.id)) await this.songs([candidate.id]);
     return candidate && this.metadata.has(candidate.id) ? candidate : undefined;
@@ -639,28 +745,56 @@ export class NativeTogetherService {
               ? "PLAY"
               : "PAUSE"
             : "PLAY";
-    requireRoomResult(
-      await this.call("roomCommand", {
-        roomId: this.ownedRoom,
-        commandInfo: JSON.stringify({
-          commandType,
-          playStatus,
-          progress: Math.round(progress),
-          formerSongId: this.state.songId || target,
-          targetSongId: target,
-          clientSeq: ++this.clientSeq,
-        }),
-      }),
-    );
-    this.commandAt = Date.now();
-    this.commandProgress = progress;
+    const previous = this.state;
+    const formerSongId = previous.songId || target;
+    const existing = this.pendingPlayback;
+    const intent: PendingPlayback =
+      existing && existing.songId === target && input.action === "goto"
+        ? existing
+        : {
+            roomId: this.ownedRoom,
+            songId: target,
+            playing: playStatus === "PLAY",
+            progressMs: progress,
+            at: Date.now(),
+            serverSeq: this.state.commandSeq || 0,
+            until: Date.now() + 15000,
+          };
+    this.pendingPlayback = intent;
     this.state = {
       ...this.state,
       songId: target,
-      playing: playStatus === "PLAY",
-      progressMs: progress,
+      playing: intent.playing,
+      progressMs: intent.progressMs,
       playbackRevision: (this.state.playbackRevision || 0) + 1,
     };
+    this.options.ownership(this.ownedRoom, target);
+    this.publish();
+    try {
+      requireRoomResult(
+        await this.call("roomCommand", {
+          roomId: this.ownedRoom,
+          commandInfo: JSON.stringify({
+            commandType,
+            playStatus,
+            progress: Math.round(progress),
+            formerSongId,
+            targetSongId: target,
+            clientSeq: ++this.clientSeq,
+          }),
+        }),
+      );
+      this.commandAt = intent.at;
+      this.commandProgress = intent.progressMs;
+      intent.songs = undefined;
+    } catch (error) {
+      if (this.pendingPlayback === intent) {
+        this.pendingPlayback = null;
+        this.state = previous;
+        this.options.ownership(this.ownedRoom, previous.songId);
+      }
+      throw error;
+    }
   }
   control(input: TogetherControl): Promise<TogetherSnapshot> {
     const end = this.pendingEnd;
@@ -715,7 +849,151 @@ export class NativeTogetherService {
       await this.command(input);
     });
   }
-  private async addSong(input: string | string[]): Promise<void> {
+  /** 复用 Windows 列表上报，受理不等于最终确认；由现有轮询在截止窗口内回收。 */
+  private async reportQueue(
+    kind: PendingQueue["kind"],
+    ids: string[],
+    optimistic = true,
+  ): Promise<void> {
+    if (this.pendingQueue) throw new Error("rate-limited");
+    const versions = this.versions.map((v) => ({
+      ...v,
+      version: String(v.userId) === this.accountId ? v.version + 1 : v.version,
+    }));
+    if (!versions.some((v) => String(v.userId) === this.accountId))
+      versions.push({ userId: Number(this.accountId), version: 1 });
+    const body = await this.call("roomAdd", {
+      roomId: this.ownedRoom,
+      playlistParam: JSON.stringify({
+        commandType: kind,
+        version: versions,
+        playMode: this.playMode,
+        anchorSongId: kind === "ADD" ? this.state.songId : "",
+        anchorPosition:
+          kind === "ADD" ? this.state.songs.findIndex((s) => s.id === this.state.songId) : -1,
+        randomList:
+          kind === "REPLACE" && this.playMode === "RANDOM"
+            ? [
+                ...this.randomList.filter((id) => ids.includes(id)),
+                ...ids.filter((id) => !this.randomList.includes(id)),
+              ]
+            : ids,
+        displayList: ids,
+      }),
+    });
+    const ack = (body.data as { result?: unknown } | undefined)?.result;
+    this.options.diagnostic?.({ acknowledged: typeof ack === "boolean" ? ack : undefined });
+    // 官方 Windows 列表上报按 code=200 或 data.result 接受；此规则不扩展到控制/心跳。
+    if (body.code !== 200 && ack !== true) throw new Error("room-operation-failed");
+    this.versions = versions;
+    if (!optimistic) return;
+    this.pendingQueue = { roomId: this.ownedRoom, kind, ids, versions, until: Date.now() + 15000 };
+    const list = this.state.songs;
+    this.state = {
+      ...this.state,
+      songs:
+        kind === "ADD"
+          ? [
+              ...list,
+              ...ids
+                .filter((id) => !list.some((s) => s.id === id))
+                .map((id) => this.metadata.get(id)!),
+            ]
+          : kind === "DELETE"
+            ? list.filter((s) => !ids.includes(s.id))
+            : ids.map((id) => list.find((s) => s.id === id)!),
+      updatedAt: Date.now(),
+    };
+  }
+
+  /** 单曲与播放全部共用一次操作：本地先播放，增量 ADD 后仅发送一条 GOTO。 */
+  play(input: string[], startIndex: number): Promise<TogetherSnapshot> {
+    if (
+      !input.length ||
+      input.length > 500 ||
+      input.some((id) => !/^[1-9]\d{0,19}$/.test(id)) ||
+      !Number.isInteger(startIndex) ||
+      startIndex < 0 ||
+      startIndex >= input.length
+    )
+      throw new Error("invalid-song");
+    const target = input[startIndex];
+    const ids = [...new Set(input)];
+    this.pendingEnd = null;
+    return this.mutation(async () => {
+      this.requireOwned();
+      const roomId = this.ownedRoom;
+      const capacity = new Set([...this.state.songs.map((s) => s.id), ...ids]).size;
+      if (capacity > 500) throw new Error("queue-full");
+      await this.songs(ids);
+      if (ids.some((id) => !this.metadata.has(id))) throw new Error("invalid-song");
+      await this.read();
+      this.requireOwned();
+      if (roomId !== this.ownedRoom) throw new Error("room-changed");
+      const missing = ids.filter((id) => !this.state.songs.some((s) => s.id === id));
+      if (missing.length + this.state.songs.length > 500) throw new Error("queue-full");
+      if (missing.length && this.pendingQueue) throw new Error("rate-limited");
+      const playback = this.options.playback();
+      const keepCurrent =
+        playback.ready && playback.songId === target && this.state.songId === target;
+      const intent: PendingPlayback = {
+        roomId,
+        songId: target,
+        playing: true,
+        progressMs: keepCurrent ? playback.progressMs : 0,
+        at: Date.now(),
+        serverSeq: this.state.commandSeq || 0,
+        until: Date.now() + 15000,
+        songs: [...this.state.songs, ...missing.map((id) => this.metadata.get(id)!)],
+      };
+      this.pendingPlayback = intent;
+      this.options.ownership(roomId, target);
+      this.publish();
+      try {
+        if (missing.length) await this.addSong(missing, false);
+        await this.command(keepCurrent ? { action: "resume" } : { action: "goto", songId: target });
+      } catch (error) {
+        if (this.pendingPlayback === intent) this.pendingPlayback = null;
+        this.options.ownership(this.ownedRoom, this.state.songId);
+        throw error;
+      }
+    });
+  }
+
+  /** 本地队列使用曲目 ID 和相对位置修改房间；清空时保留服务端当前曲。 */
+  editQueue(input: TogetherQueueEdit): Promise<TogetherSnapshot> {
+    return this.mutation(async () => {
+      this.requireOwned();
+      const roomId = this.ownedRoom;
+      await this.read();
+      this.requireOwned();
+      if (roomId !== this.ownedRoom) throw new Error("room-changed");
+      if (input.action === "clear") {
+        const ids = this.state.songs
+          .filter((s) => s.id !== this.snapshot().songId)
+          .map((s) => s.id);
+        if (ids.length) await this.reportQueue("DELETE", ids);
+      } else if (input.action === "remove") {
+        if (!this.state.songs.some((s) => s.id === input.songId)) return;
+        if (this.snapshot().songId === input.songId) throw new Error("room-current-song");
+        await this.reportQueue("DELETE", [input.songId]);
+      } else {
+        if (input.beforeId === input.songId) return;
+        const ids = this.state.songs.map((s) => s.id);
+        if (!ids.includes(input.songId) || (input.beforeId && !ids.includes(input.beforeId)))
+          throw new Error("invalid-song");
+        const reordered = ids.filter((id) => id !== input.songId);
+        reordered.splice(
+          input.beforeId ? reordered.indexOf(input.beforeId) : reordered.length,
+          0,
+          input.songId,
+        );
+        if (ids.join(",") !== reordered.join(",")) await this.reportQueue("REPLACE", reordered);
+      }
+    }, false);
+  }
+
+  private async addSong(input: string | string[], confirm = true): Promise<void> {
     this.requireOwned();
     const songIds = Array.isArray(input) ? input : [input];
     const roomId = this.ownedRoom;
@@ -723,33 +1001,13 @@ export class NativeTogetherService {
     if (songIds.some((id) => this.state.songs.some((s) => s.id === id)))
       throw new Error("already-in-queue");
     if (this.state.songs.length + songIds.length > 500) throw new Error("queue-full");
-    const versions = this.versions.map((v) => ({
-      ...v,
-      version: String(v.userId) === this.accountId ? v.version + 1 : v.version,
-    }));
-    // Windows 透传已有 version，仅在缺少本机项时用数字 UID 建立新项。
-    if (!versions.some((v) => String(v.userId) === this.accountId))
-      versions.push({ userId: Number(this.accountId), version: 1 });
     try {
-      const result = await this.call("roomAdd", {
-        roomId: this.ownedRoom,
-        playlistParam: JSON.stringify({
-          commandType: "ADD",
-          version: versions,
-          playMode: this.playMode,
-          anchorSongId: this.state.songId,
-          anchorPosition: this.state.songs.findIndex((s) => s.id === this.state.songId),
-          randomList: songIds,
-          displayList: songIds,
-        }),
-      });
-      const ack = (result.data as { result?: unknown } | undefined)?.result;
-      this.options.diagnostic?.({ acknowledged: typeof ack === "boolean" ? ack : undefined });
-      requireRoomResult(result);
+      await this.reportQueue("ADD", songIds, !confirm);
+      if (!confirm) return;
     } catch (error) {
       const code = error instanceof Error ? error.message : "offline";
       if (!["operation-unknown", "room-operation-failed"].includes(code)) throw error;
-      // 否定/未知响应不能重放 ADD；以随后读到的同一房间列表确认实际结果。
+      // 未知写请求只读核验，不能重放 ADD。
     }
     for (const [attempt, wait] of [0, 300, 900].entries()) {
       if (wait) {
@@ -801,15 +1059,19 @@ export class NativeTogetherService {
       if (this.ownedRoom !== roomId) throw new Error("room-changed");
       const queued = new Set(this.state.songs.map((song) => song.id));
       const missing = candidates.filter((id) => !queued.has(id));
-      if (missing.length) await this.addSong(missing);
-      // ADD 已读回确认，避免 mutation 再完整读取一次房间。
+      if (missing.length) await this.addSong(missing, false);
+      // 已受理的列表由现有轮询核验，不在交互路径连续拉取确认。
     }, false);
+  }
+  /** 播放历史复用渲染端原生缓存，仅接收有限的网易云曲目 ID，不主动拉取远端历史。 */
+  setHistoryCandidates(ids: string[]): void {
+    this.requireOwned();
+    if (ids.length > 500 || ids.some((id) => !/^[1-9]\d{0,19}$/.test(id)))
+      throw new Error("invalid-song");
+    this.historyIds = [...new Set(ids)];
   }
   async recommendations(): Promise<TogetherSong[]> {
     await this.account();
-    if (this.state.recommendations?.length) {
-      return structuredClone(this.state.recommendations);
-    }
     return this.personalRecommendations();
   }
   /** 好友分页只在邀请选择器主动请求时读取；缓存/单飞共享，最多十页，不后台遍历。 */
@@ -925,7 +1187,11 @@ export class NativeTogetherService {
     if (this.state.roomId !== info.roomId || this.creatorId !== this.accountId)
       throw new Error("room-changed");
     const useCurrent = current.ready && /^[1-9]\d{0,19}$/.test(current.songId);
-    const candidate = useCurrent ? current.songId : (await this.recommendations())[0]?.id;
+    const candidate = useCurrent
+      ? current.songId
+      : ((this.options.songSource?.() || "room") === "room"
+          ? this.state.recommendations?.[0]?.id
+          : undefined) || (await this.personalRecommendations())[0]?.id;
     if (!candidate) throw new Error("no-room-song");
     if (!this.state.songs.some((song) => song.id === candidate)) {
       await this.addSong(candidate);

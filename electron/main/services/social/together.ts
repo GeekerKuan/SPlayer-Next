@@ -72,7 +72,11 @@ const native = new NativeTogetherService({
     saveRoomResume(value).catch((error) => coreLog.warn("保存一起听恢复记录失败", error)),
   ownership: setNativeTogetherOwnership,
   autoRecommend: () => store.get("player.togetherAutoRecommend") !== false,
+  songSource: () => store.get("player.togetherSongSource"),
   halt: () => {
+    const window = getMainWindow();
+    if (window && !window.isDestroyed() && !window.webContents.isDestroyed())
+      window.webContents.send("together:prepare");
     const player = getPlayer();
     player.stop();
     player.setSpeed(1);
@@ -204,8 +208,19 @@ export const togetherService = {
       });
     return remember(selected().control(input));
   },
+  play: (songIds: string[], startIndex: number) => {
+    if (mode !== "native") throw new Error("native-mode-required");
+    return remember(native.play(songIds, startIndex));
+  },
+  editQueue: (input: import("@shared/types/together").TogetherQueueEdit) => {
+    if (mode !== "native") throw new Error("native-mode-required");
+    return remember(native.editQueue(input));
+  },
   ended: async (input: TogetherPlaybackEnd): Promise<void> => {
     if (mode === "native") native.notifyEnded(input);
+  },
+  historyCandidates: async (ids: string[]): Promise<void> => {
+    native.setHistoryCandidates(ids);
   },
   recommendations: () => selected().recommendations(),
   add: (songId: string) => remember(selected().add(songId)),

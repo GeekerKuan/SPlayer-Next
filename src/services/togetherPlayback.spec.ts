@@ -190,6 +190,23 @@ describe("native room playback bridge", () => {
     expect(f.load).toHaveBeenCalledOnce();
     expect(f.control).not.toHaveBeenCalled();
   });
+  it("a server acknowledgement does not cancel an in-flight load of the same song", async () => {
+    let finish!: (value: unknown) => void;
+    f.resolve.mockReturnValueOnce(
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+    );
+    const room = snapshot("ack-loading");
+    applyTogetherPlayback({ ...room, progressMs: 0 });
+    await flushPromises();
+    applyTogetherPlayback({ ...room, progressMs: 100, commandSeq: 11, playbackRevision: 2 });
+    finish({ source: "https://m8.music.126.net/audio.flac" });
+    await flushPromises();
+    expect(f.resolve).toHaveBeenCalledOnce();
+    expect(f.load).toHaveBeenCalledOnce();
+    expect(f.seek).not.toHaveBeenCalled();
+  });
   it("audio failure is bounded and never falls back to another platform", async () => {
     f.resolve.mockResolvedValueOnce(null);
     const onError = vi.fn();
@@ -213,10 +230,10 @@ describe("native room playback bridge", () => {
     expect(f.seek).toHaveBeenLastCalledWith(500);
     applyTogetherPlayback({ ...room, progressMs: 700, playbackRevision: 2, commandSeq: 11 });
     await flushPromises();
-    expect(f.seek).toHaveBeenLastCalledWith(700);
+    expect(f.seek).toHaveBeenCalledExactlyOnceWith(500);
     expect(f.control).not.toHaveBeenCalled();
   });
-  it("keeps smooth playback on a matching seek acknowledgement but still applies small new remote seeks", async () => {
+  it("keeps smooth playback across delayed acknowledgement revisions within the correction tolerance", async () => {
     const room = snapshot("room-e");
     applyTogetherPlayback(room);
     await flushPromises();
@@ -232,7 +249,10 @@ describe("native room playback bridge", () => {
     expect(f.pause).not.toHaveBeenCalled();
     applyTogetherPlayback({ ...confirmed, progressMs: 31500, playbackRevision: 3, commandSeq: 12 });
     await flushPromises();
-    expect(f.seek).toHaveBeenCalledExactlyOnceWith(31500);
+    expect(f.seek).not.toHaveBeenCalled();
+    applyTogetherPlayback({ ...confirmed, progressMs: 40000, playbackRevision: 4, commandSeq: 13 });
+    await flushPromises();
+    expect(f.seek).toHaveBeenCalledExactlyOnceWith(40000);
   });
   it("corrects a confirmed seek when the actual local clock has drifted materially", async () => {
     const room = snapshot("room-f");

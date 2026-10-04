@@ -93,37 +93,38 @@ const openCard = async (): Promise<void> => {
             class="message-bubble w-fit max-w-full whitespace-pre-wrap break-words select-text"
             :class="{ 'message-emoji': emojiOnly, 'message-invitation': message.kind === 'invite' }"
           >
-            <div v-if="message.kind === 'invite'" class="flex flex-col gap-3 whitespace-normal">
+            <div v-if="message.kind === 'invite'" class="whitespace-normal">
               <div class="flex items-center gap-3">
                 <div
                   class="size-11 rounded-xl bg-primary/10 text-primary flex items-center justify-center shrink-0"
                 >
                   <IconLucideHeadphones class="size-6" />
                 </div>
-                <div class="min-w-0">
-                  <div class="font-semibold text-base">{{ t("social.invite") }}</div>
+                <div class="min-w-0 flex-1">
+                  <div class="text-xs text-on-surface-variant mb-1">
+                    {{ t("social.inviteService") }}
+                  </div>
+                  <div class="font-semibold text-base leading-6">{{ t("social.invite") }}</div>
                   <div class="text-xs text-on-surface-variant mt-1">
                     {{ t("social.inviteActionHint") }}
                   </div>
                 </div>
-              </div>
-              <div
-                v-if="message.text && !['invite-message', '加入一起听'].includes(message.text)"
-                class="text-sm"
-              >
-                {{ message.text }}
-              </div>
-              <div class="flex flex-wrap items-center justify-between gap-2">
-                <span class="text-xs text-on-surface-variant">{{ t("social.inviteService") }}</span>
                 <SButton
                   v-if="!own"
                   size="small"
                   type="primary"
+                  class="shrink-0"
                   :disabled="!canAccept || !message.invite"
                   @click="$emit('accept', message.id)"
                 >
                   {{ t("social.accept") }}
                 </SButton>
+              </div>
+              <div
+                v-if="message.text && !['invite-message', '加入一起听'].includes(message.text)"
+                class="text-sm mt-3 leading-5"
+              >
+                {{ message.text }}
               </div>
             </div>
             <div v-else-if="message.kind === 'card' && message.card" class="flex flex-col gap-2">
@@ -262,6 +263,6 @@ const openCard = async (): Promise<void> => {
   max-width: 100%;
 }
 .message-invitation {
-  width: 360px;
+  width: 320px;
 }
 </style>

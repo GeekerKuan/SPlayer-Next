@@ -34,11 +34,20 @@ const isMember = computed(
 );
 const sourceMode = computed({
   get: () =>
-    isHost.value && !settings.system.player.togetherAutoRecommend ? "playlistOnly" : pushMode.value,
+    isHost.value
+      ? !settings.system.player.togetherAutoRecommend
+        ? "playlistOnly"
+        : settings.system.player.togetherSongSource === "history"
+          ? "queue"
+          : settings.system.player.togetherSongSource || "recommended"
+      : pushMode.value,
   set: (value: string) => {
     if (value !== "playlistOnly") pushMode.value = value;
-    if (isHost.value)
+    if (isHost.value) {
       void settings.setSystem("player.togetherAutoRecommend", value !== "playlistOnly");
+      if (value !== "playlistOnly")
+        void settings.setSystem("player.togetherSongSource", value === "queue" ? "history" : value);
+    }
   },
 });
 const sourceOptions = computed(() => [
@@ -66,11 +75,11 @@ const validRecipient = computed(
 const candidates = computed(() =>
   sourceMode.value === "playlistOnly"
     ? []
-    : pushMode.value === "recommended"
+    : sourceMode.value === "recommended"
       ? together.recommendations.filter(
           (song) => !state.value.songs.some((queued) => queued.id === song.id),
         )
-      : pushMode.value === "room"
+      : sourceMode.value === "room"
         ? (state.value.recommendations || []).filter(
             (song) => !state.value.songs.some((queued) => queued.id === song.id),
           )

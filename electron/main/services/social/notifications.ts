@@ -30,7 +30,7 @@ export const clearSocialNotifications = (): void => {
   live.clear();
 };
 
-/** 不读取聊天历史、不显示正文；过期交互只导航，由页面重新核验房间。 */
+/** 一起听邀请在前台也通知；接受按钮一次入房，过期交互导航到会话。 */
 export const publishSocialNotifications = (snapshot: SocialSnapshot): void => {
   if (snapshot.status === "auth-required") {
     clearSocialNotifications();
@@ -39,12 +39,12 @@ export const publishSocialNotifications = (snapshot: SocialSnapshot): void => {
   const items = policy.consume(snapshot);
   if (!store.get("system.socialNotifications") || !Notification.isSupported()) return;
   const window = getMainWindow();
-  if (!window || window.isDestroyed() || window.webContents.isDestroyed() || window.isFocused())
-    return;
+  if (!window || window.isDestroyed() || window.webContents.isDestroyed()) return;
   const zh = getLocale() === "zh-CN";
   for (const item of items) {
     const id = randomUUID();
     const invitation = item.content?.kind === "invite" && !!item.content.invite;
+    if (window.isFocused() && !invitation) continue;
     const notification = new Notification({
       id,
       groupId: "splayer-social",
@@ -57,7 +57,7 @@ export const publishSocialNotifications = (snapshot: SocialSnapshot): void => {
           ? "收到一条新私信"
           : "New private message",
       actions:
-        invitation && process.platform === "win32"
+        invitation && ["win32", "darwin"].includes(process.platform)
           ? [
               { type: "button", text: zh ? "接受" : "Accept" },
               { type: "button", text: zh ? "在本机忽略" : "Dismiss locally" },

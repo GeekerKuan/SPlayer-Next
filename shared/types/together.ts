@@ -58,6 +58,10 @@ export type TogetherControl =
   | { action: "pause" | "resume" | "next" | "previous" }
   | { action: "seek"; positionMs: number }
   | { action: "goto"; songId: string };
+export type TogetherQueueEdit =
+  | { action: "clear" }
+  | { action: "remove"; songId: string }
+  | { action: "move"; songId: string; beforeId?: string };
 export interface TogetherPlaybackEnd {
   roomId: string;
   songId: string;
@@ -88,9 +92,13 @@ export interface TogetherApi {
   accept: (peerId: string, messageId: string) => Promise<SocialResult<TogetherSnapshot>>;
   leave: () => Promise<SocialResult<TogetherSnapshot>>;
   control: (input: TogetherControl) => Promise<SocialResult<TogetherSnapshot>>;
+  play: (songIds: string[], startIndex: number) => Promise<SocialResult<TogetherSnapshot>>;
+  editQueue: (input: TogetherQueueEdit) => Promise<SocialResult<TogetherSnapshot>>;
   ended: (input: TogetherPlaybackEnd) => Promise<SocialResult<void>>;
+  historyCandidates: (songIds: string[]) => Promise<SocialResult<void>>;
   recommendations: () => Promise<SocialResult<TogetherSong[]>>;
   add: (songId: string) => Promise<SocialResult<TogetherSnapshot>>;
   addMany: (songIds: string[]) => Promise<SocialResult<TogetherSnapshot>>;
+  onPrepare: (callback: () => void) => () => void;
   onUpdate: (callback: (snapshot: TogetherSnapshot) => void) => () => void;
 }

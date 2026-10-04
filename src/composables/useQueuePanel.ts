@@ -6,6 +6,7 @@ import { useStatusStore } from "@/stores/status";
 import { useMediaStore } from "@/stores/media";
 import { useThemeStore } from "@/stores/theme";
 import { clearQueue, queue, queueLength } from "@/stores/queue";
+import { ownsTogetherPlayback, editTogetherQueue } from "@/services/togetherSession";
 import * as player from "@/core/player";
 
 export interface UseQueuePanelOptions {
@@ -43,6 +44,11 @@ export const useQueuePanel = (options: UseQueuePanelOptions) => {
   /** 清空队列 + 重置播放索引 */
   const clearAll = (): void => {
     if (queueLength.value === 0) return;
+    if (ownsTogetherPlayback()) {
+      void editTogetherQueue({ action: "clear" });
+      clearConfirmOpen.value = false;
+      return;
+    }
     player.stop();
     statusStore.playIndex = -1;
     clearQueue();

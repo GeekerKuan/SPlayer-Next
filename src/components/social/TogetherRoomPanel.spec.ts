@@ -85,6 +85,17 @@ describe("together room lists and roles", () => {
     expect(mocks.setSystem).toHaveBeenCalledWith("player.togetherAutoRecommend", false);
     wrapper.unmount();
   });
+  it("persists playback history as the host's continuation source and restores it when reopened", async () => {
+    const wrapper = create();
+    wrapper.findComponent(Select).vm.$emit("update:modelValue", "queue");
+    expect(mocks.setSystem).toHaveBeenCalledWith("player.togetherSongSource", "history");
+    wrapper.unmount();
+    Object.assign(settings.system.player, { togetherSongSource: "history" });
+    const reopened = create();
+    expect(reopened.findComponent(Select).props("modelValue")).toBe("queue");
+    reopened.unmount();
+    Object.assign(settings.system.player, { togetherSongSource: "recommended" });
+  });
   it("keeps room recommendation empty text in the right list and hides host-only options for members", async () => {
     together.snapshot.creatorId = "2";
     const wrapper = create();

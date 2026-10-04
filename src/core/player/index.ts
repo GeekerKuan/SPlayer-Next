@@ -42,6 +42,8 @@ import {
   ownsTogetherPlayback,
   controlTogetherPlayback,
   playTogetherTrack,
+  playTogetherTracks,
+  editTogetherQueue,
   addTogetherTracks,
 } from "@/services/togetherSession";
 
@@ -804,7 +806,7 @@ export const playFrom = async (
 ): Promise<void> => {
   if (items.length === 0) return;
   if (ownsTogetherPlayback()) {
-    await playTogetherTrack(items[Math.max(0, Math.min(startIndex, items.length - 1))]);
+    await playTogetherTracks(items, startIndex);
     return;
   }
   const status = useStatusStore();
@@ -1192,6 +1194,11 @@ export const setShuffleMode = (mode: ShuffleMode): void => {
 export const removeFromQueue = async (index: number): Promise<void> => {
   const status = useStatusStore();
   if (index < 0 || index >= queue.queueLength.value) return;
+  if (ownsTogetherPlayback()) {
+    const track = queue.getQueueItem(index)?.track;
+    if (track) await editTogetherQueue({ action: "remove", songId: track.id });
+    return;
+  }
   const isCurrentPlaying = index === status.playIndex;
   queue.removeFromQueue(index);
   if (index < status.playIndex) {
@@ -1368,6 +1375,21 @@ export const playFiles = async (filePaths: string[]): Promise<void> => {
  * @param toIndex - 目标位置
  */
 export const moveInQueue = (fromIndex: number, toIndex: number): void => {
+  if (ownsTogetherPlayback()) {
+    const ids = queue.queue.value.map((track) => track.id);
+    if (
+      fromIndex < 0 ||
+      toIndex < 0 ||
+      fromIndex >= ids.length ||
+      toIndex >= ids.length ||
+      fromIndex === toIndex
+    )
+      return;
+    const [songId] = ids.splice(fromIndex, 1);
+    ids.splice(toIndex, 0, songId);
+    void editTogetherQueue({ action: "move", songId, beforeId: ids[toIndex + 1] });
+    return;
+  }
   const status = useStatusStore();
   queue.moveInQueue(fromIndex, toIndex);
   // 根据移动方向调整 playIndex

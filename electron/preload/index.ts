@@ -76,11 +76,18 @@ const api = {
       ipcRenderer.invoke("together:accept", peerId, messageId),
     leave: () => ipcRenderer.invoke("together:leave"),
     control: (input: TogetherControl) => ipcRenderer.invoke("together:control", input),
+    play: (songIds: string[], startIndex: number) =>
+      ipcRenderer.invoke("together:play", songIds, startIndex),
+    editQueue: (input: import("@shared/types/together").TogetherQueueEdit) =>
+      ipcRenderer.invoke("together:editQueue", input),
     ended: (input: import("@shared/types/together").TogetherPlaybackEnd) =>
       ipcRenderer.invoke("together:ended", input),
+    historyCandidates: (songIds: string[]) =>
+      ipcRenderer.invoke("together:historyCandidates", songIds),
     recommendations: () => ipcRenderer.invoke("together:recommendations"),
     add: (songId: string) => ipcRenderer.invoke("together:add", songId),
     addMany: (songIds: string[]) => ipcRenderer.invoke("together:addMany", songIds),
+    onPrepare: (callback: () => void) => subscribe("together:prepare", callback),
     onUpdate: (callback: (snapshot: TogetherSnapshot) => void) => {
       ipcRenderer.removeAllListeners("together:update");
       return subscribe("together:update", callback);

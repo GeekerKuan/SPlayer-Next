@@ -59,12 +59,15 @@ const fixture = (resume?: { accountId: string; roomId: string; joinedAt: number 
     playMode: "ORDER_LOOP",
     listMode: "",
   };
+  let queueResponse: Record<string, unknown> = { data: { result: true } };
   let heartbeat = true;
   let heartbeatHook: (() => Promise<void> | void) | undefined;
   let createHook: (() => Promise<void> | void) | undefined;
   let haltHook: (() => void) | undefined;
   const playback = { songId: "10", playing: false, progressMs: 1000, ready: true, finished: false };
   let autoRecommend = true;
+  let songSource: "recommended" | "room" | "history" = "room";
+  const updates: import("@shared/types/together").TogetherSnapshot[] = [];
   let writeHook: ((operation: NativeOperation) => Promise<void> | void) | undefined;
   let playlistHook: (() => Record<string, unknown> | undefined) | undefined;
   let recommendationHook: (() => Promise<void> | void) | undefined;
@@ -80,7 +83,10 @@ const fixture = (resume?: { accountId: string; roomId: string; joinedAt: number 
       savedRooms.push(value);
     },
     account: async () => social,
-    update: () => {},
+    update: (snapshot) => {
+      updates.push(snapshot);
+    },
+    songSource: () => songSource,
     ownership: () => {},
     autoRecommend: () => autoRecommend,
     halt: () => {
@@ -154,9 +160,14 @@ const fixture = (resume?: { accountId: string; roomId: string; joinedAt: number 
           case "roomAdd": {
             await writeHook?.(operation);
             const sent = JSON.parse(String(data.playlistParam));
-            playlist.displayList.result.push(...sent.displayList);
+            if (sent.commandType === "DELETE")
+              playlist.displayList.result = playlist.displayList.result.filter(
+                (id) => !sent.displayList.includes(id),
+              );
+            else if (sent.commandType === "REPLACE") playlist.displayList.result = sent.displayList;
+            else playlist.displayList.result.push(...sent.displayList);
             playlist.version = sent.version;
-            return { data: { result: true } };
+            return queueResponse;
           }
           case "roomLeave":
             if (leaveOutcome === "unknown") throw new Error("offline");
@@ -196,6 +207,13 @@ const fixture = (resume?: { accountId: string; roomId: string; joinedAt: number 
     },
     onRecommendations: (hook: () => Promise<void> | void) => {
       recommendationHook = hook;
+    },
+    updates,
+    setQueueResponse: (body: Record<string, unknown>) => {
+      queueResponse = body;
+    },
+    setSongSource: (value: typeof songSource) => {
+      songSource = value;
     },
     setAutoRecommend: (value: boolean) => {
       autoRecommend = value;
@@ -1244,7 +1262,7 @@ test("an unexpected short-link domain falls back to the official room URL", asyn
   }
 });
 
-test("playlist addition deduplicates into one incremental ADD and one confirmation read", async (t) => {
+test("playlist addition deduplicates into one incremental ADD without blocking on confirmation", async (t) => {
   t.mock.timers.enable({ apis: ["Date"], now: Date.now() });
   const f = fixture();
   try {
@@ -1262,7 +1280,7 @@ test("playlist addition deduplicates into one incremental ADD and one confirmati
     assert.deepEqual(data.displayList, ["12", "13"]);
     assert.deepEqual(data.randomList, ["12", "13"]);
     assert.equal(data.version[0].version, 4);
-    assert.equal(f.calls.filter((call) => call.operation === "roomStatus").length, 2);
+    assert.equal(f.calls.filter((call) => call.operation === "roomStatus").length, 1);
     assert.ok(f.calls.filter((call) => call.operation === "roomSongs").length <= 1);
   } finally {
     f.service.stop();
@@ -1411,6 +1429,186 @@ test("friend directory caches each account page, excludes self and validates pag
     f.social.accountId = "2";
     await assert.rejects(f.service.friends("following", 0), /account-changed/);
   } finally {
+    f.service.stop();
+  }
+});
+
+test("direct play publishes the new song before a slow ADD completes, then sends one GOTO", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: Date.now() });
+  const f = fixture();
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  try {
+    await f.service.accept("2", "invite");
+    t.mock.timers.tick(1000);
+    f.onWrite((op) => (op === "roomAdd" ? held : undefined));
+    const job = f.service.play(["13"], 0);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.equal(f.service.snapshot().songId, "13");
+    assert.equal(f.service.snapshot().playing, true);
+    assert.ok(f.updates.some((s) => s.songId === "13"));
+    assert.equal(f.calls.filter((c) => c.operation === "roomCommand").length, 0);
+    t.mock.timers.tick(750);
+    release();
+    const next = await job;
+    assert.equal(next.songId, "13");
+    assert.equal(next.progressMs, 750);
+    assert.equal(f.calls.filter((c) => c.operation === "roomAdd").length, 1);
+    assert.equal(f.calls.filter((c) => c.operation === "roomCommand").length, 1);
+  } finally {
+    release?.();
+    f.service.stop();
+  }
+});
+
+test("play all appends unique official songs in original order and selects the original first song", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: Date.now() });
+  const f = fixture();
+  try {
+    await f.service.accept("2", "invite");
+    t.mock.timers.tick(1000);
+    const next = await f.service.play(["13", "12", "13", "10"], 0);
+    assert.equal(next.songId, "13");
+    assert.deepEqual(
+      next.songs.map((s) => s.id),
+      ["10", "11", "13", "12"],
+    );
+    const writes = f.calls.filter((c) => c.operation === "roomAdd");
+    assert.equal(writes.length, 1);
+    assert.deepEqual(JSON.parse(String(writes[0].data.playlistParam)).displayList, ["13", "12"]);
+    assert.equal(f.calls.filter((c) => c.operation === "roomCommand").length, 1);
+  } finally {
+    f.service.stop();
+  }
+});
+
+test("DELETE and REPLACE match Windows fields, and clear keeps the playing song without stopping it", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: Date.now() });
+  const f = fixture();
+  try {
+    await f.service.accept("2", "invite");
+    t.mock.timers.tick(1000);
+    await f.service.editQueue({ action: "move", songId: "11", beforeId: "10" });
+    let param = JSON.parse(
+      String(f.calls.filter((c) => c.operation === "roomAdd").at(-1)!.data.playlistParam),
+    );
+    assert.equal(param.commandType, "REPLACE");
+    assert.equal(param.anchorSongId, "");
+    assert.equal(param.anchorPosition, -1);
+    assert.deepEqual(param.displayList, ["11", "10"]);
+    t.mock.timers.tick(1000);
+    const before = f.halts();
+    const next = await f.service.editQueue({ action: "clear" });
+    param = JSON.parse(
+      String(f.calls.filter((c) => c.operation === "roomAdd").at(-1)!.data.playlistParam),
+    );
+    assert.equal(param.commandType, "DELETE");
+    assert.deepEqual(param.displayList, ["11"]);
+    assert.deepEqual(
+      next.songs.map((s) => s.id),
+      ["10"],
+    );
+    assert.equal(f.halts(), before);
+    assert.equal(f.calls.filter((c) => c.operation === "roomCommand").length, 0);
+    t.mock.timers.tick(1000);
+    await assert.rejects(
+      f.service.editQueue({ action: "remove", songId: "10" }),
+      /room-current-song/,
+    );
+  } finally {
+    f.service.stop();
+  }
+});
+
+test("an accepted Windows list report uses existing polls, expires stale projection and never repeats ADD", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: Date.now() });
+  const f = fixture();
+  try {
+    await f.service.accept("2", "invite");
+    t.mock.timers.tick(1000);
+    f.setQueueResponse({ code: 200, data: { result: false } });
+    let written = false;
+    f.onWrite((op) => {
+      if (op === "roomAdd") written = true;
+    });
+    f.onPlaylist(() =>
+      written
+        ? {
+            data: {
+              playlist: {
+                ...f.playlist,
+                displayList: { result: ["10", "11", "12"], rcmdSongIds: [] },
+              },
+              playCommand: f.command,
+            },
+          }
+        : undefined,
+    );
+    const added = await f.service.add("13");
+    assert.ok(added.songs.some((s) => s.id === "13"));
+    await f.service.connect();
+    assert.deepEqual(
+      f.service.snapshot().songs.map((s) => s.id),
+      ["10", "11", "12", "13"],
+    );
+    t.mock.timers.tick(16000);
+    await f.service.connect();
+    assert.deepEqual(
+      f.service.snapshot().songs.map((s) => s.id),
+      ["10", "11", "12"],
+    );
+    assert.equal(f.service.snapshot().error, "room-add-unconfirmed");
+    assert.equal(f.calls.filter((c) => c.operation === "roomAdd").length, 1);
+  } finally {
+    f.service.stop();
+  }
+});
+
+test("fixed history continuation excludes queued songs and does not query personal recommendations", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: Date.now() });
+  const f = fixture();
+  try {
+    await f.service.accept("2", "invite");
+    f.setSongSource("history");
+    f.service.setHistoryCandidates(["10", "11", "13", "13"]);
+    f.command.targetSongId = "11";
+    f.command.serverSeq++;
+    f.playback.songId = "11";
+    await f.service.connect();
+    t.mock.timers.tick(1000);
+    const next = await f.service.control({ action: "next" });
+    assert.equal(next.songId, "13");
+    assert.equal(f.calls.filter((c) => c.operation === "recommendations").length, 0);
+    assert.equal(f.calls.filter((c) => c.operation === "roomAdd").length, 1);
+  } finally {
+    f.service.stop();
+  }
+});
+
+test("stopping a slow direct-play operation discards its queue and command continuation", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: Date.now() });
+  const f = fixture();
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  try {
+    await f.service.accept("2", "invite");
+    t.mock.timers.tick(1000);
+    f.onWrite((op) => (op === "roomAdd" ? held : undefined));
+    const job = f.service.play(["13"], 0);
+    const rejected = assert.rejects(job, /cancelled/);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    f.service.stop();
+    release();
+    await rejected;
+    assert.equal(f.service.snapshot().playbackOwned, false);
+    assert.equal(f.service.snapshot().songs.length, 0);
+    assert.equal(f.calls.filter((c) => c.operation === "roomCommand").length, 0);
+  } finally {
+    release?.();
     f.service.stop();
   }
 });

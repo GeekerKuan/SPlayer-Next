@@ -3,6 +3,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useTogetherStore } from "./together";
 import type { TogetherSnapshot } from "@shared/types/together";
 import { controlTogetherPlayback } from "@/services/togetherSession";
+const history = vi.hoisted(() => ({
+  tracks: [] as import("@shared/types/player").Track[],
+  load: vi.fn(),
+}));
+const settings = vi.hoisted(() => ({ system: { player: { togetherSongSource: "recommended" } } }));
+vi.mock("./history", () => ({ useHistoryStore: () => history }));
+vi.mock("./settings", () => ({ useSettingsStore: () => settings }));
 vi.mock("@/services/togetherPlayback", () => ({
   applyTogetherPlayback: vi.fn(),
   disposeTogetherPlayback: vi.fn(),
@@ -92,7 +99,7 @@ describe("together state lifecycle", () => {
     expect(store.recommendations.map((s) => s.id)).toEqual(["2"]);
     expect(store.snapshot.songs.map((s) => s.id)).toEqual(["1"]);
   });
-  it("prefers live room recommendations and drops candidates from a previous room", async () => {
+  it("keeps personal recommendations separate from room recommendations and drops candidates from a previous room", async () => {
     const store = useTogetherStore();
     store.start();
     await store.connect();
@@ -104,7 +111,7 @@ describe("together state lifecycle", () => {
         { id: "3", name: "room recommendation", artists: "", durationMs: 30000 },
       ],
     });
-    expect(store.recommendations.map((song) => song.id)).toEqual(["3"]);
+    expect(store.recommendations.map((song) => song.id)).toEqual(["2"]);
     update({ ...snapshot, roomId: "b", recommendations: [] });
     expect(store.recommendations).toHaveLength(0);
     store.stop();

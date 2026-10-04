@@ -11,7 +11,11 @@ import {
   clearTogetherSession,
   setTogetherControlHandler,
   setTogetherAddHandler,
+  setTogetherPlayHandler,
+  setTogetherQueueHandler,
 } from "@/services/togetherSession";
+import { useHistoryStore } from "./history";
+import { useSettingsStore } from "./settings";
 import { getCurrentTime } from "@/services/playback";
 import { toast, type ToastInstance } from "@/composables/useToast";
 import i18n from "@/i18n";
@@ -35,13 +39,13 @@ export const useTogetherStore = defineStore("together", () => {
   const error = ref("");
   let unsubscribe: (() => void) | null = null;
   let epoch = 0;
+  let prepareSubscription: (() => void) | null = null;
+  let historyWatch: (() => void) | null = null;
   let additionToast: ToastInstance | null = null;
-  const recommendations = computed(() =>
-    (snapshot.value.recommendations?.length
-      ? snapshot.value.recommendations
-      : candidates.value
-    ).filter((s) => !snapshot.value.songs.some((queued) => queued.id === s.id)),
-  );
+  const recommendations = computed(() => {
+    const queued = new Set(snapshot.value.songs.map((song) => song.id));
+    return candidates.value.filter((song) => !queued.has(song.id));
+  });
   const unwrap = <T>(result: SocialResult<T>): T => {
     if (!result.ok) throw new Error(result.error);
     return result.data;
@@ -72,6 +76,34 @@ export const useTogetherStore = defineStore("together", () => {
     if (unsubscribe) return;
     setTogetherControlHandler(controlRequest);
     setTogetherAddHandler(addPlaylist);
+    setTogetherPlayHandler(playPlaylist);
+    setTogetherQueueHandler(editQueue);
+    prepareSubscription = window.api.together.onPrepare?.(prepareTogetherPlayback) || null;
+    const history = useHistoryStore();
+    const settings = useSettingsStore();
+    void history.load();
+    historyWatch = watch(
+      [
+        () => snapshot.value.roomId,
+        () => snapshot.value.playbackOwned,
+        () => settings.system.player.togetherSongSource,
+        () => history.tracks,
+      ],
+      () => {
+        if (
+          snapshot.value.mode !== "native" ||
+          !snapshot.value.playbackOwned ||
+          settings.system.player.togetherSongSource !== "history"
+        )
+          return;
+        const ids = history.tracks
+          .filter((track) => track.source === "netease" && !track.cloud)
+          .slice(0, 500)
+          .map((track) => track.id);
+        void window.api.together.historyCandidates(ids).catch(() => {});
+      },
+      { immediate: true },
+    );
     unsubscribe =
       window.api.together?.onUpdate((next) => {
         error.value = next.error || "";
@@ -81,6 +113,10 @@ export const useTogetherStore = defineStore("together", () => {
   function stop(): void {
     if (snapshot.value.mode === "native" && snapshot.value.playbackOwned) return;
     epoch++;
+    prepareSubscription?.();
+    prepareSubscription = null;
+    historyWatch?.();
+    historyWatch = null;
     unsubscribe?.();
     unsubscribe = null;
     controls.dispose();
@@ -223,6 +259,25 @@ export const useTogetherStore = defineStore("together", () => {
     }
     return runAddition(() => window.api.together.addMany(ids));
   };
+  /** 一次 IPC 将整份列表增量加入并播放；忙碌与失败提示由同一操作负责。 */
+  async function playPlaylist(
+    tracks: readonly import("@shared/types/player").Track[],
+    index: number,
+  ): Promise<boolean> {
+    const ids = tracks.map((track) => track.id);
+    const success = await run(() => window.api.together.play(ids, index));
+    if (!success && error.value)
+      toast.error(i18n.global.t(`social.errors.${error.value}`, error.value));
+    return success;
+  }
+  async function editQueue(
+    input: import("@shared/types/together").TogetherQueueEdit,
+  ): Promise<boolean> {
+    const success = await run(() => window.api.together.editQueue(input));
+    if (!success && error.value)
+      toast.error(i18n.global.t(`social.errors.${error.value}`, error.value));
+    return success;
+  }
   async function loadRecommendations(): Promise<void> {
     if (busy.value || recommendationsLoading.value) return;
     const current = epoch;
@@ -242,6 +297,10 @@ export const useTogetherStore = defineStore("together", () => {
   }
   function dispose(): void {
     epoch++;
+    prepareSubscription?.();
+    prepareSubscription = null;
+    historyWatch?.();
+    historyWatch = null;
     unsubscribe?.();
     unsubscribe = null;
     controls.dispose();

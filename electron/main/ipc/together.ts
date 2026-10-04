@@ -284,6 +284,35 @@ export const registerTogetherIpc = (): void => {
         .parse(args)[0],
     ),
   );
+  handle("play", (args) => {
+    const [ids, index] = z
+      .tuple([z.array(socialPeer).min(1).max(500), z.number().int().min(0).max(499)])
+      .parse(args);
+    if (index >= ids.length) throw new Error("invalid-song");
+    return togetherService.play(ids, index);
+  });
+  handle("editQueue", (args) =>
+    togetherService.editQueue(
+      z
+        .tuple([
+          z.discriminatedUnion("action", [
+            z.object({ action: z.literal("clear") }).strict(),
+            z.object({ action: z.literal("remove"), songId: socialPeer }).strict(),
+            z
+              .object({
+                action: z.literal("move"),
+                songId: socialPeer,
+                beforeId: socialPeer.optional(),
+              })
+              .strict(),
+          ]),
+        ])
+        .parse(args)[0],
+    ),
+  );
+  handle("historyCandidates", (args) =>
+    togetherService.historyCandidates(z.tuple([z.array(socialPeer).max(500)]).parse(args)[0]),
+  );
   handle("recommendations", (args) => {
     z.tuple([]).parse(args);
     return togetherService.recommendations();

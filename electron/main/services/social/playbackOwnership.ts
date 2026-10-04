@@ -11,7 +11,7 @@ export const hasTogetherPlaybackOwnership = (): boolean => locked || !!nativeRoo
 export const setTogetherPlaybackLocked = (value: boolean): void => {
   locked = value;
 };
-/** 独立房间只允许服务端当前网易云曲目进入引擎，禁止插件或本地曲目抢占。 */
+/** 独立房间仅允许当前曲或本账号已校验的待播网易云曲目进入引擎。 */
 export const setNativeTogetherOwnership = (roomId: string, songId: string): void => {
   nativeRoom = roomId;
   nativeSong = songId;
